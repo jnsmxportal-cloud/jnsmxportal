@@ -42,7 +42,7 @@ export default function ApprovalsPage() {
                 {t.submitted_at ? timeAgo(t.submitted_at) : ''}
               </div>
               <div className="mb-3 text-[12.5px] text-slate">{evidenceSummary(t)}</div>
-              <div className="mb-3.5 flex gap-2">
+              <div className="mb-3.5 flex flex-wrap gap-2">
                 {[
                   t.evidence?.photo && { Icon: ImageIcon, label: 'PHOTOS' },
                   t.evidence?.signature && { Icon: Signature, label: 'SIGNED' },

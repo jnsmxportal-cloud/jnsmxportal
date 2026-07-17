@@ -72,8 +72,9 @@ export default function InboxPage() {
   const selected = threads.find((t) => t.threadId === sel) ?? threads[0] ?? null
 
   return (
-    <div className="grid h-[calc(100vh-160px)] max-w-[980px] animate-fade grid-cols-[320px_1fr] gap-5">
-      <div className="flex min-h-0 flex-col gap-2.5">
+    <div className="grid h-[calc(100vh-180px)] max-w-[980px] animate-fade grid-cols-1 gap-5 md:h-[calc(100vh-160px)] md:grid-cols-[320px_1fr]">
+      {/* list: on mobile hidden while a thread is open */}
+      <div className={`min-h-0 flex-col gap-2.5 ${sel ? 'hidden md:flex' : 'flex'}`}>
         <button
           onClick={() => setCompose(true)}
           className="flex items-center justify-center gap-2 rounded-[13px] border-[1.5px] border-dashed border-brand/50 bg-brand-tint p-3 text-[12.5px] font-semibold text-brand-dark"
@@ -123,9 +124,19 @@ export default function InboxPage() {
         </div>
       </div>
 
-      <Card className="min-h-0 overflow-hidden">
+      <Card className={`min-h-0 flex-col overflow-hidden ${sel ? 'flex' : 'hidden md:flex'}`}>
+        {sel && (
+          <button
+            onClick={() => setSel(null)}
+            className="border-b border-line px-4 py-2 text-left text-xs font-semibold text-brand md:hidden"
+          >
+            ← All conversations
+          </button>
+        )}
         {selected ? (
-          <Conversation thread={selected} />
+          <div className="min-h-0 flex-1">
+            <Conversation thread={selected} />
+          </div>
         ) : (
           <div className="flex h-full items-center justify-center text-xs text-muted">
             Select or start a conversation

@@ -56,7 +56,7 @@ function TemplatesPanel() {
 
   return (
     <div>
-      <div className="mb-3.5 flex items-center justify-between">
+      <div className="mb-3.5 flex flex-wrap items-center justify-between gap-2">
         <div className="text-[12.5px] text-muted">
           Templates drive the scheduler — changes take effect within a minute.
         </div>
@@ -69,7 +69,7 @@ function TemplatesPanel() {
       </div>
       <div className="flex flex-col gap-2.5">
         {(templates ?? []).map((t) => (
-          <Card key={t.id} className="flex items-center gap-4 p-4">
+          <Card key={t.id} className="flex flex-wrap items-center gap-3 p-4 sm:flex-nowrap sm:gap-4">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <span className="font-display text-sm font-bold">{t.title}</span>
@@ -260,7 +260,7 @@ function UnitsPanel() {
   const toast = useToast()
 
   return (
-    <div className="grid grid-cols-3 gap-4">
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
       {stores.map((s) => (
         <Card key={s.id} className="p-4">
           <div className="mb-3 flex items-center justify-between">
@@ -371,7 +371,7 @@ function QrPanel() {
           <Printer size={13} /> Print sheet
         </button>
       </div>
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4">
         {codes.map((c, i) => (
           <Card key={i} className="flex flex-col items-center p-4 text-center">
             <img src={c.dataUrl} alt={`QR for ${c.zone}`} className="mb-2 w-full max-w-[160px]" />
@@ -391,7 +391,7 @@ function GeofencePanel() {
   const toast = useToast()
 
   return (
-    <div className="grid grid-cols-3 gap-4">
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
       {stores.map((s) => (
         <GeofenceCard key={s.id} store={s} onSave={(patch) =>
           update.mutate({ id: s.id, ...patch }, { onSuccess: () => toast(`${s.name} geofence updated`) })
@@ -507,14 +507,14 @@ export default function AdminPage() {
   }
   return (
     <div className="max-w-[1020px] animate-fade">
-      <div className="mb-5 flex gap-1 rounded-xl bg-white p-1 shadow-sm print:hidden" style={{ width: 'fit-content' }}>
+      <div className="mb-5 flex max-w-full gap-1 overflow-x-auto rounded-xl bg-white p-1 shadow-sm print:hidden lg:w-fit">
         {tabs.map((t) => {
           const TIcon = icons[t]
           return (
             <button
               key={t}
               onClick={() => setTab(t)}
-              className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-[12.5px] font-semibold transition ${
+              className={`flex flex-none items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-[12.5px] font-semibold transition lg:px-4 ${
                 tab === t ? 'bg-navy text-white' : 'text-slate'
               }`}
             >

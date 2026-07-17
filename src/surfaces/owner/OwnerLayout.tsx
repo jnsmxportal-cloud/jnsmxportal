@@ -14,6 +14,7 @@ import {
   ChartBar,
   ChatCircleDots,
   GearSix,
+  List,
   type Icon,
 } from '@phosphor-icons/react'
 import { useAuth } from '../../auth/AuthProvider'
@@ -80,6 +81,7 @@ export default function OwnerLayout() {
   const [storeId, setStoreId] = useState<string | 'all'>('all')
   const [notifOpen, setNotifOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
+  const [navOpen, setNavOpen] = useState(false)
   const location = useLocation()
 
   const { data: tasks } = useTasks({ storeId: 'all' })
@@ -105,8 +107,19 @@ export default function OwnerLayout() {
 
   return (
     <div className="flex h-full min-h-0 bg-canvas">
-      {/* Sidebar */}
-      <div className="flex w-[246px] flex-none flex-col bg-navy p-[14px] pt-5 text-white">
+      {/* mobile drawer backdrop */}
+      {navOpen && (
+        <div
+          className="fixed inset-0 z-[65] bg-navy/60 lg:hidden"
+          onClick={() => setNavOpen(false)}
+        />
+      )}
+      {/* Sidebar: static on desktop, slide-over drawer on mobile */}
+      <div
+        className={`${
+          navOpen ? 'fixed inset-y-0 left-0 z-[70] flex' : 'hidden'
+        } w-[246px] flex-none flex-col overflow-y-auto bg-navy p-[14px] pt-5 text-white lg:static lg:flex`}
+      >
         <div className="px-2 pb-5">
           <div className="mb-1 text-[10px] font-semibold uppercase tracking-[.08em] text-[#5B6478]">
             Signed in as
@@ -134,6 +147,7 @@ export default function OwnerLayout() {
                 key={n.to}
                 to={n.to}
                 end={n.end}
+                onClick={() => setNavOpen(false)}
                 className={({ isActive }) =>
                   `flex items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] font-semibold transition ${
                     isActive ? 'bg-brand text-white' : 'text-muted hover:bg-navy-2 hover:text-white'
@@ -171,20 +185,29 @@ export default function OwnerLayout() {
       {/* Main */}
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Topbar */}
-        <div className="relative z-30 flex h-16 flex-none items-center justify-between border-b border-line bg-white px-[26px]">
-          <div>
-            <h1 className="text-xl font-bold tracking-tight">
-              {titles[location.pathname] ?? 'Dashboard'}
-            </h1>
-            <div className="mt-px text-[11.5px] text-muted">{todayLabel()}</div>
+        <div className="relative z-30 flex flex-none flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-line bg-white px-4 py-2.5 lg:h-16 lg:flex-nowrap lg:px-[26px] lg:py-0">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <button
+              onClick={() => setNavOpen(true)}
+              className="flex h-9 w-9 flex-none items-center justify-center rounded-lg border border-ink/10 lg:hidden"
+              aria-label="Open navigation"
+            >
+              <List size={18} />
+            </button>
+            <div className="min-w-0">
+              <h1 className="truncate text-base font-bold tracking-tight lg:text-xl">
+                {titles[location.pathname] ?? 'Dashboard'}
+              </h1>
+              <div className="mt-px hidden text-[11.5px] text-muted sm:block">{todayLabel()}</div>
+            </div>
           </div>
-          <div className="flex items-center gap-3.5">
-            <div className="flex gap-0.5 rounded-[10px] bg-canvas p-[3px]">
+          <div className="flex min-w-0 flex-1 items-center justify-end gap-2 lg:flex-none lg:gap-3.5">
+            <div className="flex min-w-0 gap-0.5 overflow-x-auto rounded-[10px] bg-canvas p-[3px]">
               {[{ id: 'all' as const, name: 'All stores' }, ...stores].map((s) => (
                 <button
                   key={s.id}
                   onClick={() => setStoreId(s.id)}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                  className={`whitespace-nowrap rounded-lg px-2.5 py-1.5 text-xs font-semibold transition lg:px-3 ${
                     storeId === s.id ? 'bg-white text-ink shadow-sm' : 'text-muted'
                   }`}
                 >
@@ -198,7 +221,7 @@ export default function OwnerLayout() {
                   setNotifOpen((o) => !o)
                   if (!notifOpen && unread > 0) markRead.mutate()
                 }}
-                className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-ink/10 bg-white"
+                className="relative flex h-10 w-10 flex-none items-center justify-center rounded-xl border border-ink/10 bg-white"
               >
                 <Bell size={19} />
                 {unread > 0 && (
@@ -208,7 +231,7 @@ export default function OwnerLayout() {
                 )}
               </button>
               {notifOpen && (
-                <div className="absolute right-0 top-12 z-50 w-[340px] animate-fade overflow-hidden rounded-2xl border border-ink/10 bg-white shadow-[0_24px_60px_rgba(15,20,32,.18)]">
+                <div className="absolute right-0 top-12 z-50 w-[340px] max-w-[calc(100vw-32px)] animate-fade overflow-hidden rounded-2xl border border-ink/10 bg-white shadow-[0_24px_60px_rgba(15,20,32,.18)]">
                   <div className="flex items-center justify-between border-b border-line px-4 py-3.5">
                     <span className="font-display text-sm font-bold">Notifications</span>
                     <span className="text-[11px] text-muted">{unread} unread</span>
@@ -257,15 +280,16 @@ export default function OwnerLayout() {
             {profile!.role !== 'manager' && (
               <button
                 onClick={() => setCreateOpen(true)}
-                className="flex h-10 items-center gap-[7px] rounded-xl bg-brand px-4 text-[13px] font-semibold text-white"
+                className="flex h-10 flex-none items-center gap-[7px] rounded-xl bg-brand px-3 text-[13px] font-semibold text-white lg:px-4"
               >
-                <Plus size={15} weight="bold" /> New task
+                <Plus size={15} weight="bold" />
+                <span className="hidden sm:inline">New task</span>
               </button>
             )}
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-[26px] pb-10 pt-6">
+        <div className="flex-1 overflow-y-auto px-4 pb-10 pt-4 lg:px-[26px] lg:pt-6">
           <Outlet context={{ storeId } satisfies OwnerCtx} />
         </div>
       </div>

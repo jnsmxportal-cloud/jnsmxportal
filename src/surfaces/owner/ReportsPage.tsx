@@ -134,7 +134,7 @@ export default function ReportsPage() {
   )
 
   return (
-    <div className="grid max-w-[900px] animate-fade grid-cols-2 items-start gap-5">
+    <div className="grid max-w-[900px] animate-fade grid-cols-1 items-start gap-5 md:grid-cols-2">
       <Card className="p-5">
         <h3 className="mb-1 text-sm font-bold">Task completion rate</h3>
         <div className="mb-4 text-[11.5px] text-muted">Live · by store</div>
@@ -188,7 +188,7 @@ export default function ReportsPage() {
         </div>
       </Card>
 
-      <div className="col-span-2 grid grid-cols-4 gap-4">
+      <div className="col-span-full grid grid-cols-2 gap-4 md:grid-cols-4">
         {tiles.map((r) => (
           <Card key={r.label} className="p-4">
             <div className="font-display text-[26px] font-bold" style={{ color: r.color }}>
@@ -199,7 +199,7 @@ export default function ReportsPage() {
         ))}
       </div>
 
-      <div className="col-span-2 flex gap-2.5">
+      <div className="col-span-full flex flex-wrap gap-2.5">
         {exportBtn('Export PDF', FilePdf, exportPdf, true)}
         {exportBtn('Excel', FileXls, () => exportCsv('xls'))}
         {exportBtn('CSV', FileCsv, () => exportCsv('csv'))}

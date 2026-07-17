@@ -175,7 +175,7 @@ export default function TemplateEditor({
         </div>
 
         <div className="flex flex-col gap-4 overflow-y-auto px-6 py-5">
-          <div className="grid grid-cols-[2fr_1fr] gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[2fr_1fr]">
             <div>
               <label className={label}>Title</label>
               <input value={title} onChange={(e) => setTitle(e.target.value)} className={inputCls} placeholder="e.g. Closing Checklist" />
@@ -194,7 +194,7 @@ export default function TemplateEditor({
             <label className={label}>Instructions</label>
             <textarea value={description} onChange={(e) => setDescription(e.target.value)} className={`${inputCls} h-16 resize-none`} placeholder="Shown to staff at the top of the task" />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <label className={label}>Category</label>
               <div className="flex flex-wrap gap-1.5">
@@ -240,7 +240,7 @@ export default function TemplateEditor({
                     {weekdayToggles(exceptDays, setExceptDays)}
                   </div>
                 )}
-                <div className="grid grid-cols-3 gap-2.5">
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
                   <div>
                     <div className="mb-1 text-[11px] font-semibold text-slate">Times (HH:MM)</div>
                     <input value={times} onChange={(e) => setTimes(e.target.value)} placeholder="07:00, 14:00" className={inputCls} />
@@ -272,7 +272,7 @@ export default function TemplateEditor({
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <label className={label}>Required evidence</label>
               <div className="flex flex-wrap gap-1.5">

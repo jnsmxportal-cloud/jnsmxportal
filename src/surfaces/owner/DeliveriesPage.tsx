@@ -37,7 +37,7 @@ function VerifyModal({ delivery, onClose }: { delivery: Delivery; onClose: () =>
           {delivery.supplier} · Inv #{delivery.invoice_no} — Remote Office step: confirm cost &amp;
           quantity, then it goes to the Owner for approval.
         </div>
-        <div className="mb-3 grid grid-cols-2 gap-3">
+        <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <label className={label}>Cost per original invoice (£)</label>
             <input value={cost} onChange={(e) => setCost(e.target.value)} inputMode="decimal" className={inputCls} />
@@ -112,12 +112,12 @@ function InvoiceFolder({ storeId }: { storeId: string | 'all' }) {
       {(invoices ?? []).map((inv) => (
         <div
           key={inv.id}
-          className="grid grid-cols-[1.2fr_1fr_.8fr_1.4fr_auto] items-center gap-3 border-t border-ink/5 px-5 py-3 text-[12.5px]"
+          className="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 border-t border-ink/5 px-5 py-3 text-[12.5px] md:grid-cols-[1.2fr_1fr_.8fr_1.4fr_auto]"
         >
           <span className="font-semibold">{inv.supplier}</span>
-          <span className="text-slate">{storeName(inv.store_id)}</span>
-          <span className="font-mono text-slate">{inv.invoice_no ? `#${inv.invoice_no}` : '—'}</span>
-          <span className="truncate font-mono text-[11px] text-muted">{inv.pdf_path}</span>
+          <span className="hidden text-slate md:block">{storeName(inv.store_id)}</span>
+          <span className="hidden font-mono text-slate md:block">{inv.invoice_no ? `#${inv.invoice_no}` : '—'}</span>
+          <span className="col-span-2 truncate font-mono text-[11px] text-muted md:col-span-1">{inv.pdf_path}</span>
           <button
             onClick={() => open(inv.pdf_path)}
             title={`Uploaded by ${userName(inv.uploaded_by)} · ${timeAgo(inv.uploaded_at)}`}
@@ -149,6 +149,8 @@ export default function DeliveriesPage() {
   return (
     <div className="animate-fade">
     <Card className="max-w-[980px] overflow-hidden">
+    <div className="overflow-x-auto">
+    <div className="min-w-[860px]">
       <div className="grid grid-cols-[1.3fr_1fr_.7fr_.8fr_.9fr_.7fr_auto] gap-3 bg-canvas px-5 py-[13px] text-[11px] font-bold uppercase tracking-wide text-muted">
         <span>Supplier</span>
         <span>Store</span>
@@ -226,6 +228,8 @@ export default function DeliveriesPage() {
       {(deliveries ?? []).length === 0 && (
         <div className="p-10 text-center text-xs text-muted">No deliveries logged yet.</div>
       )}
+    </div>
+    </div>
     </Card>
     <InvoiceFolder storeId={storeId} />
     {verifying && <VerifyModal delivery={verifying} onClose={() => setVerifying(null)} />}

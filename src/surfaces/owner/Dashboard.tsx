@@ -82,7 +82,7 @@ export default function Dashboard() {
   return (
     <div className="animate-fade">
       {/* KPI row */}
-      <div className="mb-5 grid grid-cols-5 gap-4">
+      <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:gap-4 xl:grid-cols-5">
         {kpis.map((k) => (
           <Card key={k.label} className="relative overflow-hidden p-[18px]">
             <div className="absolute bottom-0 left-0 top-0 w-1" style={{ background: k.c }} />
@@ -102,7 +102,7 @@ export default function Dashboard() {
         ))}
       </div>
 
-      <div className="grid grid-cols-[1.55fr_1fr] items-start gap-5">
+      <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-[1.55fr_1fr]">
         {/* LEFT */}
         <div className="flex flex-col gap-5">
           {/* Store status */}
@@ -111,10 +111,7 @@ export default function Dashboard() {
               title="Store status · live"
               right={<span className="text-[11.5px] text-muted">{visibleStores.length} stores</span>}
             />
-            <div
-              className="grid gap-[13px]"
-              style={{ gridTemplateColumns: `repeat(${Math.min(visibleStores.length, 3)}, 1fr)` }}
-            >
+            <div className="grid grid-cols-1 gap-[13px] sm:grid-cols-2 lg:grid-cols-3">
               {visibleStores.map((s) => {
                 const comp = storeCompliance(allTasks ?? [], s.id)
                 const dot = comp >= 92 ? '#16B364' : comp >= 80 ? '#F59E0B' : '#E5484D'
@@ -182,7 +179,7 @@ export default function Dashboard() {
               return (
                 <div
                   key={d.id}
-                  className="grid grid-cols-[1.4fr_1fr_.9fr_auto] items-center gap-3 border-b border-ink/5 px-[17px] py-3"
+                  className="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 border-b border-ink/5 px-[17px] py-3 sm:grid-cols-[1.4fr_1fr_.9fr_auto]"
                 >
                   <div>
                     <div className="text-[13px] font-semibold">{d.supplier}</div>
@@ -191,7 +188,7 @@ export default function Dashboard() {
                     </div>
                   </div>
                   <div
-                    className="text-xs"
+                    className="hidden text-xs sm:block"
                     style={{
                       color: d.discrepancy_units > 0 ? '#E5484D' : '#8B93A4',
                       fontWeight: d.discrepancy_units > 0 ? 700 : 400,
@@ -199,8 +196,11 @@ export default function Dashboard() {
                   >
                     {d.discrepancy_units > 0 ? `${d.discrepancy_units} short` : '—'}
                   </div>
-                  <div className="text-[11.5px] text-muted">
+                  <div className="col-span-2 text-[11.5px] text-muted sm:col-span-1">
                     {userName(d.submitted_by)} · {timeAgo(d.submitted_at)}
+                    {d.discrepancy_units > 0 && (
+                      <span className="font-bold text-danger sm:hidden"> · {d.discrepancy_units} short</span>
+                    )}
                   </div>
                   <StatusChip text={st.label} color={st.c} bg={st.b} />
                 </div>

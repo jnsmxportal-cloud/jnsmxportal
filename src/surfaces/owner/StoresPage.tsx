@@ -24,7 +24,7 @@ export default function StoresPage() {
   const online = (profiles ?? []).filter((p) => p.is_online).length
 
   return (
-    <div className="grid max-w-[960px] animate-fade grid-cols-3 gap-[18px]">
+    <div className="grid max-w-[960px] animate-fade grid-cols-1 gap-[18px] sm:grid-cols-2 xl:grid-cols-3">
       {stores.map((s) => {
         const comp = pct(tasks ?? [], s.id)
         const dot = comp >= 92 ? '#16B364' : comp >= 80 ? '#F59E0B' : '#E5484D'
