@@ -8,11 +8,17 @@ Covers every implemented feature against **PRD v1.2 (Final)**. Each test lists s
 
 | Item | Value |
 |---|---|
+| **Production (preferred for UAT)** | **https://jnsmxportal.vercel.app** — real HTTPS, so PWA install and Web Push work on any device incl. iPhones |
 | App (dev) | `cd app && npm run dev` → http://localhost:5173 |
-| App (prod build) | `npm run build && npm run preview` → http://localhost:4173 (use this for PWA/service-worker tests) |
+| App (local prod build) | `npm run build && npm run preview` → http://localhost:4173 |
+| Source repo | https://github.com/jnsmxportal-cloud/jnsmxportal — pushes to `main` auto-deploy to Vercel |
 | Backend | Supabase project `store-operations-engine` (`ttgubeyxuwkwaovugkxz`, eu-west-2) |
 | SQL editor | Supabase Dashboard → SQL — needed for the scheduler time-travel helpers in §12 |
 | Password (all demo accounts) | `StoreOps!2026` |
+
+**Deployment config (verify once):** Vercel env vars `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are set; `vercel.json` rewrites all routes to `index.html` — spot-check by loading a deep link directly (e.g. `https://jnsmxportal.vercel.app/owner/approvals`) → app loads, no 404.
+
+**Stale-cache note:** the service worker now auto-updates (`skipWaiting` + `clientsClaim`). If a device last loaded a build older than 17 Jul 2026 evening, fully close and reopen the app once, then reload — from then on new deploys apply automatically on next open (see T14.5).
 
 **Demo accounts**
 
@@ -268,7 +274,7 @@ select app.scheduler_tick();
 
 ## 13 · Web Push **[AC-2]**
 
-Use the **production build** (http://localhost:4173 — SW registered) in Chrome/Edge.
+Test on **https://jnsmxportal.vercel.app** (real HTTPS — works on any device; localhost:4173 also works on the test machine only).
 
 **T13.1 Subscribe.** As amara → Profile → Push notifications → **Enable** → allow the permission prompt. → Row shows "Enabled ✓"; `push_subscriptions` has a row for her with endpoint + keys.
 
@@ -281,6 +287,8 @@ Use the **production build** (http://localhost:4173 — SW registered) in Chrome
 **T13.5 iOS gate (needs an iPhone, iOS ≥ 16.4).** Open the site in Safari → Profile. → The Enable button is replaced by "Install first ↓" and a 4-step Add-to-Home-Screen walkthrough. After installing and reopening from the Home Screen the Enable button appears and subscribing works.
 
 **T13.6 VAPID from secrets.** `POST /functions/v1/push-fanout` with the anon bearer. → `{processed,sent,failed}` JSON, no key errors (keys read from `app_secrets`).
+
+**T13.7 CORS from the deployed origin.** On https://jnsmxportal.vercel.app perform any action that notifies (submit a task, send a message) with DevTools console open. → **No** CORS error on `functions/v1/push-fanout` (the function returns `Access-Control-Allow-Origin` and handles the OPTIONS preflight; regression guard for the bug fixed 17 Jul 2026).
 
 ---
 
@@ -296,7 +304,7 @@ Use the production build.
 
 **T14.4 Reconnect sync.** Go back online (stay in the app). → Toast "1 offline submission synced ✓"; the submission appears in the owner's queue; if a reading breached, the escalation fires now. Repeat for Delivery and Incident (all three queue offline).
 
-**T14.5 SW update flow.** Rebuild with any small change, reload twice. → New service worker activates (prompt-based registration; no stale white screen).
+**T14.5 SW auto-update on deploy.** With the app open on a device, push any small change to `main` (Vercel redeploys). Fully close the app/tab, reopen, reload once. → The new version is live (check a visible change or the bundle hash in DevTools → Network). The new worker calls `skipWaiting`/`clientsClaim`, so clients are never stuck on a stale precache; no user prompt is required.
 
 **T14.6 Lighthouse.** Chrome Lighthouse → PWA category against :4173. → Installable checks pass (HTTPS check is satisfied by localhost).
 
@@ -358,7 +366,31 @@ As gareeth → Reports:
 
 ---
 
-## 20 · Acceptance-criteria traceability (PRD §11)
+## 20 · Responsive layout (PRD §8.4 / FR-8.1a)
+
+Run on https://jnsmxportal.vercel.app with Chrome DevTools device toolbar at **375 px** (phone), **768 px** (tablet) and **1280 px** (desktop) — or on real devices. Global rule for every screen at every width: **the page body never scrolls horizontally**; wide tables scroll inside their own card.
+
+**T20.1 Owner nav — phone.** At 375 px, sign in as gareeth. → No fixed sidebar; a ☰ button sits top-left. Tapping it slides the navy nav in as a drawer over a dimmed backdrop; tapping a nav item or the backdrop closes it. At 1280 px the sidebar is permanently visible and the ☰ is gone (breakpoint `lg`/1024 px).
+
+**T20.2 Owner topbar — phone.** At 375 px → title truncates instead of wrapping the bar; store chips scroll horizontally in place; "New task" collapses to the ➕ icon; the notifications popover fits within the viewport width.
+
+**T20.3 Dashboard reflow.** KPI tiles: 2 columns at 375 px → 3 at 768 px → 5 at ≥1280 px. Dashboard body: single stacked column below ~1280 px, two columns (1.55fr/1fr) above. Store-status cards: 1 → 2 → 3 columns. Delivery rows on phone stack to two lines with the discrepancy folded into the byline in red.
+
+**T20.4 Deliveries & invoice tables.** At 375 px the 7-column deliveries table pans horizontally **inside its card**; the invoice-folder rows stack (supplier + path/action) without breaking the page.
+
+**T20.5 Inbox — phone behaves like a messaging app.** At 375 px: thread list fills the screen; tapping a thread replaces it with the full-height conversation and an "← All conversations" link; ≥768 px shows the two-pane list + conversation layout.
+
+**T20.6 Admin.** Tab bar scrolls horizontally on phone; Units/Geofence panels reflow 1 → 2 → 3 columns, QR cards 2 → 3 → 4; the template editor, create-task, user and delivery-verify modals collapse their field grids to a single column and stay fully operable at 375 px.
+
+**T20.7 Reports & Stores.** Chart cards stack at phone width; summary tiles 2-up; export buttons wrap. Store cards 1 → 2 → 3 columns.
+
+**T20.8 Team Leader.** At 768 px (landscape tablet) the approvals grid is 2-up with the icon rail; at 375 px cards stack single-column and the header wraps without overflow.
+
+**T20.9 Staff surface.** Phone-first by design: full-width at 375 px; at desktop widths it renders as a centered phone-width column (intended kiosk/personal surface, PRD §8.4).
+
+---
+
+## 21 · Acceptance-criteria traceability (PRD §11)
 
 | AC | Covered by | Status expectation |
 |---|---|---|
@@ -377,5 +409,7 @@ As gareeth → Reports:
 | 13 Invoice → PDF, filed, no Remote Office | §8 | Pass |
 | 14 Message + push + read receipt + audit | §9 | Pass |
 | 15 Manager view-only | T2.3, T10.9 | Pass |
+| §8.4 responsive (mobile/tablet/desktop) | §20 | Pass |
+| FR-8.1a Owner dashboard mobile-friendly | T20.1–T20.4 | Pass |
 
 **Known scope notes (expected "not implemented"):** notification quiet-hours preferences UI, custom workflow-chain builder, background (app-closed) geofencing (PWA platform limit — Capacitor wrapper is the documented path), WhatsApp channel, EPOS API sync.
