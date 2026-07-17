@@ -9,7 +9,7 @@ export default defineConfig({
       strategies: 'injectManifest',
       srcDir: 'src',
       filename: 'sw.ts',
-      registerType: 'prompt',
+      registerType: 'autoUpdate',
       injectManifest: {
         globPatterns: ['**/*.{js,css,html,png,svg,woff2}'],
       },

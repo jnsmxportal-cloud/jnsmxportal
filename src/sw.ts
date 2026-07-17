@@ -1,9 +1,14 @@
 /// <reference lib="webworker" />
 declare let self: ServiceWorkerGlobalScope
 
+import { clientsClaim } from 'workbox-core'
 import { cleanupOutdatedCaches, createHandlerBoundToURL, precacheAndRoute } from 'workbox-precaching'
 import { NavigationRoute, registerRoute } from 'workbox-routing'
 import { CacheFirst, NetworkFirst, StaleWhileRevalidate } from 'workbox-strategies'
+
+// take over immediately on deploy — stale clients pick up new versions on next load
+self.skipWaiting()
+clientsClaim()
 
 precacheAndRoute(self.__WB_MANIFEST)
 cleanupOutdatedCaches()
