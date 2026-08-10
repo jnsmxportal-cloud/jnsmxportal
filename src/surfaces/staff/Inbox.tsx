@@ -59,7 +59,22 @@ export function InboxThread() {
   const { threads } = useThreads()
   const thread = threads.find((t) => t.threadId === threadId)
 
-  if (!thread) return null
+  if (!thread)
+    return (
+      <div className="flex h-full min-h-0 flex-col items-center justify-center gap-2 p-6 text-center">
+        <ChatCircleDots size={30} color="#C3C9D2" />
+        <div className="text-sm font-bold">Conversation not found</div>
+        <div className="text-xs leading-relaxed text-muted">
+          It may still be loading, or the conversation is no longer available.
+        </div>
+        <button
+          onClick={() => navigate('/staff/inbox')}
+          className="mt-2 rounded-[13px] bg-brand px-5 py-2.5 text-[13px] font-bold text-white"
+        >
+          Back to inbox
+        </button>
+      </div>
+    )
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-2 border-b border-line bg-white px-3 py-2">

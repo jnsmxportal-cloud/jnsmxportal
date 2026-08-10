@@ -342,6 +342,7 @@ export default function TemplateEditor({
                     />
                   )}
                   <button onClick={() => setItem(i, { qr: !it.qr })} title="QR required" className={`rounded-lg p-1.5 ${it.qr ? 'bg-info text-white' : 'text-muted'}`}><QrCode size={14} /></button>
+                  <button onClick={() => setItem(i, { signature: !it.signature })} title="Signature required" className={`rounded-lg p-1.5 ${it.signature ? 'bg-ink text-white' : 'text-muted'}`}><Signature size={14} /></button>
                   <button onClick={() => setItems((a) => a.filter((_, ix) => ix !== i))} className="p-1.5 text-danger"><Trash size={14} /></button>
                 </div>
               ))}

@@ -17,22 +17,8 @@ import { useAuth } from '../../auth/AuthProvider'
 import { useDeliveries, useEscalations, useProfiles, useTasks } from '../../data/hooks'
 import { dueLabel, timeAgo } from '../../lib/format'
 import { useOwnerCtx } from './OwnerLayout'
-import { ApprovalCard, useNames } from './shared'
-import type { TaskInstance } from '../../lib/types'
-
-function storeCompliance(tasks: TaskInstance[], storeId: string): number {
-  const relevant = tasks.filter((t) => t.store_id === storeId)
-  const done = relevant.filter((t) => ['completed', 'approved', 'submitted'].includes(t.status)).length
-  const bad = relevant.filter(
-    (t) =>
-      t.status === 'missed' ||
-      (['assigned', 'in_progress', 'rejected'].includes(t.status) &&
-        t.due_at &&
-        new Date(t.due_at) < new Date()),
-  ).length
-  if (done + bad === 0) return 100
-  return Math.round((done / (done + bad)) * 100)
-}
+import { ApprovalCard, storeCompliance, useNames } from './shared'
+import { isOnline, useUserStoreRoles } from '../../data/ownerExtras'
 
 export default function Dashboard() {
   const { storeId } = useOwnerCtx()
@@ -41,6 +27,7 @@ export default function Dashboard() {
   const { data: deliveries } = useDeliveries(storeId)
   const { data: escalations } = useEscalations(storeId)
   const { data: profiles } = useProfiles()
+  const { data: storeRoles } = useUserStoreRoles()
   const { userName, storeName } = useNames()
 
   const tasks = useMemo(
@@ -77,7 +64,12 @@ export default function Dashboard() {
     { label: 'Compliance', value: `${compliance}%`, Icon: ShieldCheck, c: '#7C3AED', b: '#F1EBFC' },
   ]
 
-  const onlineStaff = (profiles ?? []).filter((p) => p.is_online)
+  const onlineStaff = (profiles ?? []).filter(isOnline)
+  const onlineInStore = (sid: string) =>
+    onlineStaff.filter((p) =>
+      (storeRoles ?? []).some((r) => r.user_id === p.id && r.store_id === sid),
+    ).length
+  const todaysDeliveries = (deliveries ?? []).filter((d) => isToday(new Date(d.submitted_at)))
 
   return (
     <div className="animate-fade">
@@ -115,15 +107,18 @@ export default function Dashboard() {
               {visibleStores.map((s) => {
                 const comp = storeCompliance(allTasks ?? [], s.id)
                 const dot = comp >= 92 ? '#16B364' : comp >= 80 ? '#F59E0B' : '#E5484D'
-                const opening = (allTasks ?? []).some(
-                  (t) =>
-                    t.store_id === s.id &&
-                    t.title.toLowerCase().includes('opening') &&
-                    ['submitted', 'completed', 'approved'].includes(t.status) &&
-                    t.submitted_at &&
-                    isToday(new Date(t.submitted_at)),
-                )
-                const staffCount = onlineStaff.length
+                const doneToday = (word: string) =>
+                  (allTasks ?? []).some(
+                    (t) =>
+                      t.store_id === s.id &&
+                      t.title.toLowerCase().includes(word) &&
+                      ['submitted', 'completed', 'approved'].includes(t.status) &&
+                      t.submitted_at &&
+                      isToday(new Date(t.submitted_at)),
+                  )
+                const opening = doneToday('opening')
+                const closing = doneToday('closing')
+                const staffCount = onlineInStore(s.id)
                 return (
                   <Card key={s.id} className="p-[15px]">
                     <div className="mb-2.5 flex items-center gap-2">
@@ -150,7 +145,11 @@ export default function Dashboard() {
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-slate">Closing</span>
-                        <StatusChip text="Tonight" color="#5B6478" bg="#F0F1F4" />
+                        {closing ? (
+                          <StatusChip text="Done ✓" color="#0E9152" bg="#E7F7EF" />
+                        ) : (
+                          <StatusChip text="Tonight" color="#5B6478" bg="#F0F1F4" />
+                        )}
                       </div>
                       <div className="flex items-center justify-between border-t border-ink/5 pt-1.5">
                         <span className="flex items-center gap-1 text-slate">
@@ -172,9 +171,9 @@ export default function Dashboard() {
                 <Truck size={16} weight="fill" color="#3B82F6" />
                 <h3 className="text-sm font-bold">Today's deliveries</h3>
               </div>
-              <span className="text-[11.5px] text-muted">{(deliveries ?? []).length} logged</span>
+              <span className="text-[11.5px] text-muted">{todaysDeliveries.length} logged</span>
             </div>
-            {(deliveries ?? []).map((d) => {
+            {todaysDeliveries.map((d) => {
               const st = deliveryStatusStyle[d.status]
               return (
                 <div
@@ -206,6 +205,9 @@ export default function Dashboard() {
                 </div>
               )
             })}
+            {todaysDeliveries.length === 0 && (
+              <div className="p-8 text-center text-xs text-muted">No deliveries logged today.</div>
+            )}
           </Card>
 
           {/* Overdue */}

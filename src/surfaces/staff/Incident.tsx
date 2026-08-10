@@ -1,16 +1,17 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ArrowLeft,
   Camera,
-  CheckCircle,
   Package,
   Plug,
   ShieldWarning,
   SmileySad,
+  X,
 } from '@phosphor-icons/react'
 import { useSubmitIncident } from '../../data/hooks'
 import { useToast } from '../../components/Toast'
+import { compressImage } from '../../lib/image'
 import { useStaffStore } from './StaffShell'
 
 const types = [
@@ -29,17 +30,40 @@ export default function Incident() {
   const [type, setType] = useState(types[0].label)
   const [desc, setDesc] = useState('')
   const [prio, setPrio] = useState<(typeof prios)[number]>('High')
-  const [photos, setPhotos] = useState(0)
+  const [photos, setPhotos] = useState<{ blob: Blob; url: string }[]>([])
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const addPhoto = async (f: File | undefined) => {
+    if (!f) return
+    try {
+      const blob = await compressImage(f)
+      setPhotos((p) => [...p, { blob, url: URL.createObjectURL(blob) }])
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not process the photo', 'error')
+    }
+  }
+
+  const removePhoto = (i: number) => {
+    setPhotos((p) => {
+      URL.revokeObjectURL(p[i].url)
+      return p.filter((_, idx) => idx !== i)
+    })
+  }
 
   const doSubmit = () => {
+    if (!store) {
+      toast('No store assigned to your account', 'error')
+      return
+    }
     const crit = prio === 'Critical'
     submit.mutate(
       {
-        storeId: store!.id,
+        storeId: store.id,
         type,
         description: desc,
         priority: prio.toLowerCase() as 'low' | 'medium' | 'high' | 'critical',
-        photoCount: photos,
+        photoCount: photos.length,
+        photos: photos.map((p) => p.blob),
       },
       {
         onSuccess: ({ queued }) => {
@@ -79,6 +103,17 @@ export default function Incident() {
   const label = 'mb-2 block text-xs font-semibold text-slate'
   return (
     <div className="flex min-h-full flex-col bg-canvas">
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(e) => {
+          addPhoto(e.target.files?.[0])
+          e.target.value = ''
+        }}
+      />
       <div className="border-b border-line bg-white px-4 pb-3 pt-2">
         <div className="flex items-center gap-2.5">
           <button onClick={() => navigate('/staff')} className="p-1">
@@ -141,21 +176,23 @@ export default function Incident() {
         </div>
         <div>
           <label className={label}>Photos</label>
-          <div className="flex gap-2">
-            {Array.from({ length: photos }).map((_, i) => (
+          <div className="flex flex-wrap gap-2">
+            {photos.map((ph, i) => (
               <div
-                key={i}
-                className="flex h-14 w-14 items-center justify-center rounded-[11px] border border-ink/5"
-                style={{
-                  background:
-                    'repeating-linear-gradient(45deg,#eef0f3,#eef0f3 5px,#e4e7ec 5px,#e4e7ec 10px)',
-                }}
+                key={ph.url}
+                className="relative h-14 w-14 overflow-hidden rounded-[11px] border border-ink/5"
               >
-                <CheckCircle size={18} weight="fill" color="#16B364" />
+                <img src={ph.url} alt="" className="h-full w-full object-cover" />
+                <button
+                  onClick={() => removePhoto(i)}
+                  className="absolute right-0.5 top-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-ink/70"
+                >
+                  <X size={11} weight="bold" color="#fff" />
+                </button>
               </div>
             ))}
             <button
-              onClick={() => setPhotos((p) => p + 1)}
+              onClick={() => fileRef.current?.click()}
               className="flex h-14 w-14 items-center justify-center rounded-[11px] border-[1.5px] border-dashed border-ink/20 bg-[#F9FAFB]"
             >
               <Camera size={20} color="#8B93A4" />

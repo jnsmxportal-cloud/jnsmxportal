@@ -4,6 +4,7 @@ import { format } from 'date-fns'
 import { useAuth } from '../auth/AuthProvider'
 import { useMarkThreadRead, useSendMessage, type Thread } from '../data/messages'
 import { useProfiles } from '../data/hooks'
+import { useToast } from './Toast'
 
 export function PresenceDot({ online }: { online: boolean }) {
   return (
@@ -20,14 +21,16 @@ export default function Conversation({ thread }: { thread: Thread }) {
   const { data: profiles } = useProfiles()
   const send = useSendMessage()
   const markRead = useMarkThreadRead()
+  const toast = useToast()
   const [text, setText] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
   const me = session!.user.id
   const other = (profiles ?? []).find((p) => p.id === thread.otherUser)
 
   useEffect(() => {
-    if (thread.unread > 0) markRead.mutate(thread.threadId)
-  }, [thread.threadId, thread.unread])
+    // guard against refire loops: only mark when there is something unread and no mark in flight
+    if (thread.unread > 0 && !markRead.isPending) markRead.mutate(thread.threadId)
+  }, [thread.threadId, thread.unread, markRead.isPending])
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
@@ -35,7 +38,10 @@ export default function Conversation({ thread }: { thread: Thread }) {
 
   const doSend = () => {
     if (!text.trim()) return
-    send.mutate({ threadId: thread.threadId, toUser: thread.otherUser, body: text.trim() })
+    send.mutate(
+      { threadId: thread.threadId, toUser: thread.otherUser, body: text.trim() },
+      { onError: (e) => toast(e.message, 'error') },
+    )
     setText('')
   }
 

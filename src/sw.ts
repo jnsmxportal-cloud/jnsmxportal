@@ -6,8 +6,7 @@ import { cleanupOutdatedCaches, createHandlerBoundToURL, precacheAndRoute } from
 import { NavigationRoute, registerRoute } from 'workbox-routing'
 import { CacheFirst, NetworkFirst, StaleWhileRevalidate } from 'workbox-strategies'
 
-// take over immediately on deploy — stale clients pick up new versions on next load
-self.skipWaiting()
+// activation is user-driven: the app posts SKIP_WAITING when the user accepts the update
 clientsClaim()
 
 precacheAndRoute(self.__WB_MANIFEST)
@@ -24,12 +23,16 @@ registerRoute(
   new CacheFirst({ cacheName: 'google-fonts-files' }),
 )
 registerRoute(
-  ({ url }) => url.pathname.startsWith('/rest/v1/'),
+  ({ url, request }) =>
+    url.pathname.startsWith('/rest/v1/') &&
+    !url.pathname.includes('app_secrets') &&
+    request.method === 'GET',
   new NetworkFirst({ cacheName: 'api', networkTimeoutSeconds: 4 }),
 )
 
 self.addEventListener('message', (event) => {
   if (event.data?.type === 'SKIP_WAITING') self.skipWaiting()
+  if (event.data?.type === 'CLEAR_API_CACHE') event.waitUntil(caches.delete('api'))
 })
 
 // ===== Web Push (PWA-6 / FR-5) =====
@@ -55,14 +58,17 @@ self.addEventListener('notificationclick', (event) => {
   event.notification.close()
   const link: string = event.notification.data?.deep_link ?? '/'
   event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((wins) => {
+    (async () => {
+      const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
       for (const w of wins) {
-        if ('focus' in w) {
-          w.navigate(link)
-          return w.focus()
+        try {
+          await w.navigate(link)
+          return await w.focus()
+        } catch {
+          // navigate/focus can reject (cross-origin, discarded client) — fall back
         }
       }
       return self.clients.openWindow(link)
-    }),
+    })(),
   )
 })

@@ -1,20 +1,29 @@
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, CircleNotch, FilePdf, Receipt, Scan } from '@phosphor-icons/react'
 import { format } from 'date-fns'
 import { jsPDF } from 'jspdf'
 import { supabase, ORG_ID } from '../../lib/supabase'
 import { useAuth } from '../../auth/AuthProvider'
+import { useInvoices } from '../../data/hooks'
 import { audit } from '../../data/ops'
+import { timeAgo } from '../../lib/format'
 import { useToast } from '../../components/Toast'
+import DocScanner from '../../components/DocScanner'
 import { useStaffStore } from './StaffShell'
 
 const suppliers = ['Booker', 'Coca-Cola Enterprises', 'Nisa', 'Bestway', 'Other']
 
-/** FR-4.1a: enhance a camera capture for archive legibility (resize, grayscale, contrast stretch). */
-async function enhanceToJpeg(file: File): Promise<string> {
-  const img = await createImageBitmap(file)
-  const maxSide = 1400
+/** FR-4.1a: enhance a scan for archive legibility (grayscale, contrast stretch). */
+async function enhanceScan(dataUrl: string): Promise<{ dataUrl: string; w: number; h: number }> {
+  const img = await new Promise<HTMLImageElement>((res, rej) => {
+    const el = new Image()
+    el.onload = () => res(el)
+    el.onerror = () => rej(new Error('Could not read the scanned image'))
+    el.src = dataUrl
+  })
+  const maxSide = 1600
   const scale = Math.min(1, maxSide / Math.max(img.width, img.height))
   const w = Math.round(img.width * scale)
   const h = Math.round(img.height * scale)
@@ -39,47 +48,73 @@ async function enhanceToJpeg(file: File): Promise<string> {
     px[i] = px[i + 1] = px[i + 2] = v
   }
   ctx.putImageData(data, 0, 0)
-  return canvas.toDataURL('image/jpeg', 0.85)
+  return { dataUrl: canvas.toDataURL('image/jpeg', 0.85), w, h }
 }
 
 export default function InvoiceUpload() {
   const navigate = useNavigate()
   const toast = useToast()
+  const qc = useQueryClient()
   const { session } = useAuth()
   const store = useStaffStore()
-  const fileRef = useRef<HTMLInputElement>(null)
   const [supplier, setSupplier] = useState(suppliers[0])
   const [invoiceNo, setInvoiceNo] = useState('')
-  const [preview, setPreview] = useState<string | null>(null)
+  const [preview, setPreview] = useState<{ dataUrl: string; w: number; h: number } | null>(null)
   const [busy, setBusy] = useState(false)
+  const [scanning, setScanning] = useState(false)
+  const { data: recentInvoices } = useInvoices(store?.id)
 
-  const onFile = async (f: File | undefined) => {
-    if (!f) return
+  const onScanned = async (dataUrl: string) => {
+    setScanning(false)
     setBusy(true)
     try {
-      setPreview(await enhanceToJpeg(f))
+      setPreview(await enhanceScan(dataUrl))
       toast('Scan enhanced · contrast corrected, ready to file', 'success')
+    } catch (e) {
+      toast((e as Error).message || 'Could not process the scan — please retry', 'error')
     } finally {
       setBusy(false)
     }
   }
 
+  const openInvoice = async (path: string | null) => {
+    if (!path) return
+    const { data, error } = await supabase.storage.from('invoices').createSignedUrl(path, 300)
+    if (error || !data?.signedUrl) {
+      toast('Could not open the PDF', 'error')
+      return
+    }
+    window.open(data.signedUrl, '_blank')
+  }
+
   const submit = async () => {
-    if (!preview || !store) return
+    if (!preview || busy) return
+    if (!store) {
+      toast('No store is assigned to your account — ask your manager to add you to a store', 'error')
+      return
+    }
     setBusy(true)
     try {
       const pdf = new jsPDF({ unit: 'mm', format: 'a4' })
-      pdf.addImage(preview, 'JPEG', 8, 8, 194, 0)
+      // fit within A4 margins, preserving the scan's aspect ratio
+      const availW = 194
+      const availH = 281
+      let wMM = availW
+      let hMM = (availW * preview.h) / preview.w
+      if (hMM > availH) {
+        hMM = availH
+        wMM = (availH * preview.w) / preview.h
+      }
+      pdf.addImage(preview.dataUrl, 'JPEG', 8 + (availW - wMM) / 2, 8, wMM, hMM)
       const blob = pdf.output('blob')
-      // filed by store / supplier / month (FR-6.6)
+      // filed by store / supplier / month (FR-6.6); timestamp suffix keeps paths unique
       const month = format(new Date(), 'yyyy-MM')
       const safe = (s: string) => s.replace(/[^a-zA-Z0-9-_]/g, '_')
-      const path = `${safe(store.name)}/${safe(supplier)}/${month}/${safe(invoiceNo || `scan-${Date.now()}`)}.pdf`
+      const path = `${safe(store.name)}/${safe(supplier)}/${month}/${safe(invoiceNo || 'scan')}-${Date.now()}.pdf`
       const { error: upErr } = await supabase.storage.from('invoices').upload(path, blob, {
         contentType: 'application/pdf',
-        upsert: true,
       })
-      if (upErr) throw upErr
+      if (upErr) throw new Error(`Upload failed: ${upErr.message}`)
       const { error } = await supabase.from('invoices').insert({
         org_id: ORG_ID,
         store_id: store.id,
@@ -89,8 +124,13 @@ export default function InvoiceUpload() {
         pdf_path: path,
         uploaded_by: session!.user.id,
       })
-      if (error) throw error
-      await audit(session!.user.id, 'invoice.uploaded', 'invoice', '', { path })
+      if (error) throw new Error(`Filing failed: ${error.message}`)
+      try {
+        await audit(session!.user.id, 'invoice.uploaded', 'invoice', '', { path })
+      } catch {
+        /* audit is best-effort */
+      }
+      qc.invalidateQueries({ queryKey: ['invoices'] })
       navigate('/staff/success', {
         state: {
           icon: 'seal',
@@ -112,17 +152,16 @@ export default function InvoiceUpload() {
 
   return (
     <div className="flex min-h-full flex-col bg-canvas">
-      <input
-        ref={fileRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        className="hidden"
-        onChange={(e) => onFile(e.target.files?.[0])}
-      />
+      {scanning && (
+        <DocScanner
+          title="Scan invoice"
+          onDone={onScanned}
+          onClose={() => setScanning(false)}
+        />
+      )}
       <div className="border-b border-line bg-white px-4 pb-3 pt-2">
         <div className="flex items-center gap-2.5">
-          <button onClick={() => navigate('/staff')} className="p-1">
+          <button onClick={() => navigate('/staff')} className="p-1" aria-label="Back">
             <ArrowLeft size={20} />
           </button>
           <div className="flex-1">
@@ -156,7 +195,7 @@ export default function InvoiceUpload() {
         </div>
 
         <button
-          onClick={() => fileRef.current?.click()}
+          onClick={() => setScanning(true)}
           className="flex w-full items-center gap-3 rounded-[14px] border-[1.5px] border-brand/50 bg-brand-tint p-3.5 text-left"
         >
           <div className="flex h-[46px] w-[46px] flex-none items-center justify-center rounded-xl bg-brand">
@@ -169,7 +208,7 @@ export default function InvoiceUpload() {
           <div className="flex-1">
             <div className="text-sm font-bold">{preview ? 'Retake scan' : 'Scan invoice'}</div>
             <div className="mt-px text-[11.5px] text-muted">
-              Auto contrast-enhance · saved as archive-ready PDF
+              Auto edge detect · adjust corners · archive-ready PDF
             </div>
           </div>
         </button>
@@ -179,7 +218,36 @@ export default function InvoiceUpload() {
             <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-success-deep">
               <FilePdf size={16} weight="fill" /> Enhanced preview
             </div>
-            <img src={preview} alt="Enhanced invoice scan" className="max-h-[300px] w-full rounded-lg object-contain" />
+            <img
+              src={preview.dataUrl}
+              alt="Enhanced invoice scan"
+              className="max-h-[300px] w-full rounded-lg object-contain"
+            />
+          </div>
+        )}
+
+        {(recentInvoices ?? []).length > 0 && (
+          <div className="rounded-[14px] border border-line bg-white">
+            <div className="border-b border-ink/5 px-4 py-3 text-xs font-bold">
+              Recently filed — {store?.name}
+            </div>
+            {(recentInvoices ?? []).slice(0, 8).map((inv) => (
+              <button
+                key={inv.id}
+                onClick={() => openInvoice(inv.pdf_path)}
+                className="flex w-full items-center gap-2.5 border-t border-ink/5 px-4 py-2.5 text-left first:border-t-0"
+              >
+                <FilePdf size={18} color="#DB2777" weight="fill" className="flex-none" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[12.5px] font-semibold">
+                    {inv.supplier}
+                    {inv.invoice_no ? ` · #${inv.invoice_no}` : ''}
+                  </span>
+                  <span className="block text-[10.5px] text-muted">{timeAgo(inv.uploaded_at)}</span>
+                </span>
+                <span className="text-[11px] font-semibold text-brand">Open</span>
+              </button>
+            ))}
           </div>
         )}
       </div>

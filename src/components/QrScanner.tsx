@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import jsQR from 'jsqr'
 import { X } from '@phosphor-icons/react'
 
+const MAX_SCAN_DIM = 640
+
 export default function QrScanner({
   onDetect,
   onClose,
@@ -11,6 +13,12 @@ export default function QrScanner({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [error, setError] = useState<string | null>(null)
+  const [attempt, setAttempt] = useState(0)
+  // keep the latest onDetect without restarting the camera when the parent re-renders
+  const onDetectRef = useRef(onDetect)
+  useEffect(() => {
+    onDetectRef.current = onDetect
+  }, [onDetect])
 
   useEffect(() => {
     let stream: MediaStream | null = null
@@ -23,14 +31,16 @@ export default function QrScanner({
       if (stopped) return
       const video = videoRef.current
       if (video && video.readyState === video.HAVE_ENOUGH_DATA) {
-        canvas.width = video.videoWidth
-        canvas.height = video.videoHeight
-        ctx.drawImage(video, 0, 0)
+        // downscale before getImageData — decoding a full 1080p+ frame per rAF is too slow
+        const scale = Math.min(1, MAX_SCAN_DIM / Math.max(video.videoWidth, video.videoHeight))
+        canvas.width = Math.round(video.videoWidth * scale)
+        canvas.height = Math.round(video.videoHeight * scale)
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
         const img = ctx.getImageData(0, 0, canvas.width, canvas.height)
-        const code = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' })
+        const code = jsQR(img.data, img.width, img.height, { inversionAttempts: 'attemptBoth' })
         if (code?.data) {
           stopped = true
-          onDetect(code.data)
+          onDetectRef.current(code.data)
           return
         }
       }
@@ -39,11 +49,19 @@ export default function QrScanner({
 
     navigator.mediaDevices
       .getUserMedia({ video: { facingMode: 'environment' } })
-      .then((s) => {
+      .then(async (s) => {
+        if (stopped) {
+          s.getTracks().forEach((t) => t.stop())
+          return
+        }
         stream = s
         if (videoRef.current) {
           videoRef.current.srcObject = s
-          videoRef.current.play()
+          try {
+            await videoRef.current.play()
+          } catch {
+            // play() rejects when the element unmounts mid-start — safe to ignore
+          }
         }
         raf = requestAnimationFrame(scan)
       })
@@ -54,7 +72,7 @@ export default function QrScanner({
       cancelAnimationFrame(raf)
       stream?.getTracks().forEach((t) => t.stop())
     }
-  }, [onDetect])
+  }, [attempt])
 
   return (
     <div className="fixed inset-0 z-[85] flex flex-col bg-navy">
@@ -69,7 +87,18 @@ export default function QrScanner({
       </div>
       <div className="relative flex flex-1 items-center justify-center overflow-hidden">
         {error ? (
-          <div className="max-w-[280px] p-6 text-center text-sm text-white/80">{error}</div>
+          <div className="flex max-w-[280px] flex-col items-center gap-4 p-6 text-center">
+            <div className="text-sm text-white/80">{error}</div>
+            <button
+              onClick={() => {
+                setError(null)
+                setAttempt((a) => a + 1)
+              }}
+              className="rounded-xl bg-brand px-5 py-2.5 text-sm font-bold text-white"
+            >
+              Try again
+            </button>
+          </div>
         ) : (
           <>
             <video ref={videoRef} playsInline muted className="h-full w-full object-cover" />

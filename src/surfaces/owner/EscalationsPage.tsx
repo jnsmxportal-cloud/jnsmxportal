@@ -65,7 +65,10 @@ export default function EscalationsPage() {
                   onClick={() =>
                     resolve.mutate(
                       { id: e.id, status: 'investigating' },
-                      { onSuccess: () => toast('Marked as investigating', 'info') },
+                      {
+                        onSuccess: () => toast('Marked as investigating', 'info'),
+                        onError: (err) => toast(err.message, 'error'),
+                      },
                     )
                   }
                   className="rounded-[10px] bg-ink px-4 py-2 text-[12.5px] font-semibold text-white"
@@ -76,7 +79,10 @@ export default function EscalationsPage() {
                   onClick={() =>
                     resolve.mutate(
                       { id: e.id, status: 'resolved' },
-                      { onSuccess: () => toast('Escalation resolved') },
+                      {
+                        onSuccess: () => toast('Escalation resolved'),
+                        onError: (err) => toast(err.message, 'error'),
+                      },
                     )
                   }
                   className="rounded-[10px] border border-ink/15 bg-white px-4 py-2 text-[12.5px] font-semibold text-slate"

@@ -5,12 +5,14 @@ import Conversation, { PresenceDot } from '../../components/Conversation'
 import { useThreads, useSendMessage } from '../../data/messages'
 import { useProfiles } from '../../data/hooks'
 import { useAuth } from '../../auth/AuthProvider'
+import { useToast } from '../../components/Toast'
 import { timeAgo } from '../../lib/format'
 
 function ComposeModal({ onClose, onSent }: { onClose: () => void; onSent: (threadId: string) => void }) {
   const { session } = useAuth()
   const { data: profiles } = useProfiles()
   const send = useSendMessage()
+  const toast = useToast()
   const targets = (profiles ?? []).filter((p) => p.id !== session!.user.id)
   const [to, setTo] = useState('')
   const [body, setBody] = useState('')
@@ -51,7 +53,10 @@ function ComposeModal({ onClose, onSent }: { onClose: () => void; onSent: (threa
           onClick={() =>
             send.mutate(
               { toUser: to, body: body.trim() },
-              { onSuccess: (threadId) => { onSent(threadId); onClose() } },
+              {
+                onSuccess: (threadId) => { onSent(threadId); onClose() },
+                onError: (e) => toast(e.message, 'error'),
+              },
             )
           }
           disabled={!to || !body.trim() || send.isPending}
@@ -69,7 +74,10 @@ export default function InboxPage() {
   const { data: profiles } = useProfiles()
   const [sel, setSel] = useState<string | null>(null)
   const [compose, setCompose] = useState(false)
-  const selected = threads.find((t) => t.threadId === sel) ?? threads[0] ?? null
+  // keep the chosen thread selected; if it hasn't landed in the refetched list yet,
+  // show a "Sending…" pane rather than silently switching to another conversation
+  const selected = sel ? threads.find((t) => t.threadId === sel) ?? null : threads[0] ?? null
+  const pendingSend = !!sel && !selected
 
   return (
     <div className="grid h-[calc(100vh-180px)] max-w-[980px] animate-fade grid-cols-1 gap-5 md:h-[calc(100vh-160px)] md:grid-cols-[320px_1fr]">
@@ -136,6 +144,11 @@ export default function InboxPage() {
         {selected ? (
           <div className="min-h-0 flex-1">
             <Conversation thread={selected} />
+          </div>
+        ) : pendingSend ? (
+          <div className="flex h-full flex-col items-center justify-center gap-2 text-xs text-muted">
+            <ChatCircleDots size={30} color="#C3C9D2" />
+            Sending…
           </div>
         ) : (
           <div className="flex h-full items-center justify-center text-xs text-muted">

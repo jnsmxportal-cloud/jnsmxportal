@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import QRCode from 'qrcode'
 import {
   Check,
@@ -96,7 +97,10 @@ function TemplatesPanel() {
             </button>
             <button
               onClick={() =>
-                del.mutate(t.id, { onSuccess: () => toast(`Template “${t.title}” deleted`) })
+                del.mutate(t.id, {
+                  onSuccess: () => toast(`Template “${t.title}” deleted`),
+                  onError: (e) => toast(e.message, 'error'),
+                })
               }
               className="rounded-lg p-1.5 text-danger"
             >
@@ -258,6 +262,7 @@ function UnitsPanel() {
   const saveUnit = useSaveUnit()
   const delUnit = useDeleteUnit()
   const toast = useToast()
+  const onErr = { onError: (e: Error) => toast(e.message, 'error') }
 
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -270,7 +275,10 @@ function UnitsPanel() {
                 const name = `Chiller #${((units ?? []).filter((u) => u.store_id === s.id && u.type === 'chiller').length + 1)}`
                 saveUnit.mutate(
                   { store_id: s.id, name, type: 'chiller', safe_limit: 5, breach_above: 7, display_order: 99 },
-                  { onSuccess: () => toast(`${name} added to ${s.name}`) },
+                  {
+                    onSuccess: () => toast(`${name} added to ${s.name}`),
+                    onError: (e) => toast(e.message, 'error'),
+                  },
                 )
               }}
               className="flex items-center gap-1 rounded-lg bg-brand-tint px-2.5 py-1 text-[11px] font-semibold text-brand-dark"
@@ -289,33 +297,33 @@ function UnitsPanel() {
                       defaultValue={u.name}
                       onBlur={(e) =>
                         e.target.value !== u.name &&
-                        saveUnit.mutate({ id: u.id, store_id: u.store_id, name: e.target.value })
+                        saveUnit.mutate({ id: u.id, store_id: u.store_id, name: e.target.value }, onErr)
                       }
                       className="flex-1 bg-transparent text-[12.5px] font-semibold outline-none"
                     />
                     <select
                       defaultValue={u.type}
-                      onChange={(e) => saveUnit.mutate({ id: u.id, store_id: u.store_id, type: e.target.value as 'chiller' | 'freezer' })}
+                      onChange={(e) => saveUnit.mutate({ id: u.id, store_id: u.store_id, type: e.target.value as 'chiller' | 'freezer' }, onErr)}
                       className="rounded-md border border-ink/10 bg-white px-1 py-0.5 text-[10.5px]"
                     >
                       <option value="chiller">chiller</option>
                       <option value="freezer">freezer</option>
                     </select>
-                    <button onClick={() => delUnit.mutate(u.id)} className="p-0.5 text-danger"><Trash size={13} /></button>
+                    <button onClick={() => delUnit.mutate(u.id, onErr)} className="p-0.5 text-danger"><Trash size={13} /></button>
                   </div>
                   <div className="flex items-center gap-2 text-[10.5px] text-muted">
                     safe ≤
                     <input
                       type="number"
                       defaultValue={u.safe_limit}
-                      onBlur={(e) => saveUnit.mutate({ id: u.id, store_id: u.store_id, safe_limit: parseFloat(e.target.value) })}
+                      onBlur={(e) => saveUnit.mutate({ id: u.id, store_id: u.store_id, safe_limit: parseFloat(e.target.value) }, onErr)}
                       className="w-12 rounded-md border border-ink/10 bg-white px-1 py-0.5 text-center text-[11px] font-semibold text-ink"
                     />
                     °C · escalate &gt;
                     <input
                       type="number"
                       defaultValue={u.breach_above}
-                      onBlur={(e) => saveUnit.mutate({ id: u.id, store_id: u.store_id, breach_above: parseFloat(e.target.value) })}
+                      onBlur={(e) => saveUnit.mutate({ id: u.id, store_id: u.store_id, breach_above: parseFloat(e.target.value) }, onErr)}
                       className="w-12 rounded-md border border-ink/10 bg-white px-1 py-0.5 text-center text-[11px] font-semibold text-danger"
                     />
                     °C
@@ -496,8 +504,19 @@ function GeofenceCard({
 }
 
 // ================= page =================
+const tabParams: Record<string, Tab> = {
+  templates: 'Templates',
+  users: 'Users',
+  units: 'Units',
+  qr: 'QR codes',
+  geofence: 'Geofence',
+}
+
 export default function AdminPage() {
-  const [tab, setTab] = useState<Tab>('Templates')
+  const [params] = useSearchParams()
+  const [tab, setTab] = useState<Tab>(
+    tabParams[(params.get('tab') ?? '').toLowerCase()] ?? 'Templates',
+  )
   const icons: Record<Tab, typeof UsersIcon> = {
     Templates: PencilSimple,
     Users: UsersIcon,

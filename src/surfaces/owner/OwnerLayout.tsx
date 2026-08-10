@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { NavLink, Outlet, useLocation, useOutletContext } from 'react-router-dom'
+import { NavLink, Outlet, useLocation, useNavigate, useOutletContext } from 'react-router-dom'
 import {
   Bell,
   ClockCountdown,
@@ -83,6 +83,7 @@ export default function OwnerLayout() {
   const [createOpen, setCreateOpen] = useState(false)
   const [navOpen, setNavOpen] = useState(false)
   const location = useLocation()
+  const navigate = useNavigate()
 
   const { data: tasks } = useTasks({ storeId: 'all' })
   const { data: escalations } = useEscalations('all')
@@ -196,7 +197,11 @@ export default function OwnerLayout() {
             </button>
             <div className="min-w-0">
               <h1 className="truncate text-base font-bold tracking-tight lg:text-xl">
-                {titles[location.pathname] ?? 'Dashboard'}
+                {Object.entries(titles)
+                  .filter(
+                    ([p]) => location.pathname === p || location.pathname.startsWith(`${p}/`),
+                  )
+                  .sort((a, b) => b[0].length - a[0].length)[0]?.[1] ?? 'Dashboard'}
               </h1>
               <div className="mt-px hidden text-[11.5px] text-muted sm:block">{todayLabel()}</div>
             </div>
@@ -240,9 +245,13 @@ export default function OwnerLayout() {
                     {(notifs ?? []).map((nt) => {
                       const style = notifIconColors[nt.type] ?? { c: '#5B6478', b: '#F0F1F4' }
                       return (
-                        <div
+                        <button
                           key={nt.id}
-                          className={`flex gap-3 border-b border-ink/5 px-4 py-3 ${!nt.read_at ? 'bg-brand-tint/40' : ''}`}
+                          onClick={() => {
+                            setNotifOpen(false)
+                            navigate(nt.deep_link ?? '/owner')
+                          }}
+                          className={`flex w-full gap-3 border-b border-ink/5 px-4 py-3 text-left hover:bg-canvas ${!nt.read_at ? 'bg-brand-tint/40' : ''}`}
                         >
                           <div
                             className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[10px]"
@@ -267,7 +276,7 @@ export default function OwnerLayout() {
                           {!nt.read_at && (
                             <span className="mt-1 h-2 w-2 flex-none rounded-full bg-brand" />
                           )}
-                        </div>
+                        </button>
                       )
                     })}
                     {(notifs ?? []).length === 0 && (

@@ -15,7 +15,7 @@ export default function TempLog() {
   const { data: units } = useStoreUnits(store?.id)
   const { data: tasks } = useTasks({ storeId: 'all' })
   const instance = (tasks ?? []).find((t) => t.id === id) ?? null
-  const { result: geo, checking } = useGeofence(store)
+  const { result: geo, checking, retry } = useGeofence(store)
   const submit = useSubmitTempLog()
   const [vals, setVals] = useState<Record<string, string>>({})
 
@@ -31,7 +31,10 @@ export default function TempLog() {
   const blocked = geo?.verdict === 'off_site'
 
   const doSubmit = () => {
-    if (!store) return
+    if (!store) {
+      toast('No store assigned to your account', 'error')
+      return
+    }
     submit.mutate(
       {
         instance,
@@ -94,6 +97,19 @@ export default function TempLog() {
       </div>
 
       <div className="flex-1 p-4">
+        {!checking && geo?.verdict === 'unknown' && (
+          <div className="mb-3.5 flex items-center justify-between gap-2.5 rounded-[13px] border border-amber/25 bg-warn-soft p-3">
+            <div className="text-[11.5px] font-medium leading-snug text-amber">
+              Location unavailable — enable location so this log is verified on-site.
+            </div>
+            <button
+              onClick={retry}
+              className="flex-none rounded-[9px] border border-amber/40 bg-white px-3 py-1.5 text-[11.5px] font-semibold text-amber"
+            >
+              Retry location
+            </button>
+          </div>
+        )}
         {hasFail && (
           <div className="mb-3.5 flex gap-2.5 rounded-[13px] border border-danger/25 bg-danger-soft p-3">
             <WarningOctagon size={20} weight="fill" color="#E5484D" className="flex-none" />

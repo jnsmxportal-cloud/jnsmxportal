@@ -4,6 +4,7 @@ import { useAuth } from '../../auth/AuthProvider'
 import { Avatar } from '../../components/ui'
 import { useStaffStore } from './StaffShell'
 import { useToast } from '../../components/Toast'
+import { usePendingOps } from '../../data/hooks'
 import { enablePush, isPushEnabled } from '../../lib/push'
 import { iosNeedsInstallForPush } from '../../lib/ios'
 
@@ -17,6 +18,7 @@ export default function Profile() {
   const toast = useToast()
   const [installEvt, setInstallEvt] = useState<BeforeInstallPromptEvent | null>(null)
   const [pushOn, setPushOn] = useState(false)
+  const pending = usePendingOps()
 
   useEffect(() => {
     isPushEnabled().then(setPushOn)
@@ -84,11 +86,12 @@ export default function Profile() {
             <button
               onClick={async () => {
                 const r = await enablePush(profile!.id)
-                if (r === 'enabled') {
+                if (r.ok) {
                   setPushOn(true)
                   toast('Push notifications enabled on this device')
-                } else if (r === 'denied') toast('Notification permission was denied', 'warn')
-                else toast('Push is not supported in this browser', 'warn')
+                } else if (r.status === 'denied') toast('Notification permission was denied', 'warn')
+                else if (r.status === 'unsupported') toast('Push is not supported in this browser', 'warn')
+                else toast(`Could not enable push: ${r.error ?? 'unknown error'}`, 'error')
               }}
               className="rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white"
             >
@@ -111,8 +114,13 @@ export default function Profile() {
           <span className="flex items-center gap-2 text-slate">
             <ArrowsClockwise size={15} color="#16B364" /> Sync status
           </span>
-          <span className="font-semibold text-success">
-            {navigator.onLine ? 'All synced ✓' : 'Offline · queued'}
+          <span
+            className="font-semibold"
+            style={{ color: pending > 0 ? '#F59E0B' : '#16B364' }}
+          >
+            {pending > 0
+              ? `${pending} submission${pending === 1 ? '' : 's'} queued — will sync automatically`
+              : 'All synced ✓'}
           </span>
         </div>
       </div>

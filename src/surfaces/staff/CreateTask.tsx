@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { ArrowLeft } from '@phosphor-icons/react'
 import { useAuth } from '../../auth/AuthProvider'
 import { useCreateTask } from '../../data/hooks'
@@ -20,20 +20,28 @@ export default function CreateTask() {
   const { session } = useAuth()
   const store = useStaffStore()
   const create = useCreateTask()
-  const [title, setTitle] = useState('')
-  const [type, setType] = useState(types[0])
+  const prefill = (useLocation().state ?? {}) as { title?: string; category?: string }
+  const [title, setTitle] = useState(prefill.title ?? '')
+  const [type, setType] = useState(
+    () => types.find((t) => t.cat === prefill.category) ?? types[0],
+  )
+  const [category, setCategory] = useState(prefill.category ?? types[0].cat)
   const [prio, setPrio] = useState<(typeof prios)[number]>('medium')
   const [due, setDue] = useState('')
 
   const save = () => {
+    if (!store) {
+      toast('No store assigned to your account', 'error')
+      return
+    }
     create.mutate(
       {
         title: title || 'Untitled task',
-        storeIds: [store!.id],
+        storeIds: [store.id],
         assignedTo: session!.user.id,
         dueAt: due ? new Date(due).toISOString() : null,
         priority: prio,
-        category: type.cat,
+        category,
         evidence: {},
       },
       {
@@ -84,7 +92,10 @@ export default function CreateTask() {
             {types.map((t) => (
               <button
                 key={t.label}
-                onClick={() => setType(t)}
+                onClick={() => {
+                  setType(t)
+                  setCategory(t.cat)
+                }}
                 className={`rounded-[10px] border px-3 py-2 text-xs font-semibold ${
                   type.label === t.label
                     ? 'border-brand bg-brand-tint text-brand-dark'

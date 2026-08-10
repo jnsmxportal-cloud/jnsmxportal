@@ -10,7 +10,12 @@ import {
   WarningOctagon,
 } from '@phosphor-icons/react'
 import { useAuth } from '../../auth/AuthProvider'
-import { useEscalations, useTasks } from '../../data/hooks'
+import {
+  useEscalations,
+  useMarkNotificationsRead,
+  useNotifications,
+  useTasks,
+} from '../../data/hooks'
 import { timeAgo } from '../../lib/format'
 import { Avatar, Card, PrioBadge } from '../../components/ui'
 import { ApprovalActions, evidenceSummary, kindMeta, useNames } from '../owner/shared'
@@ -19,12 +24,23 @@ export default function LeaderShell() {
   const { profile, stores, myStoreIds, signOut } = useAuth()
   const navigate = useNavigate()
   const [view, setView] = useState<'approvals' | 'escalations'>('approvals')
+  const [notifOpen, setNotifOpen] = useState(false)
   const myStore = stores.find((s) => myStoreIds.includes(s.id))
   const { data: tasks } = useTasks({ storeId: myStore?.id ?? 'all' })
   const { data: escalations } = useEscalations(myStore?.id ?? 'all')
+  const { data: notifs } = useNotifications()
+  const markRead = useMarkNotificationsRead()
   const { userName } = useNames()
 
   const queue = (tasks ?? []).filter((t) => t.status === 'submitted')
+  const unread = (notifs ?? []).filter((n) => !n.read_at).length
+
+  // team_leader can reach /staff/* and /leader — re-route owner-only deep links
+  const openNotif = (link: string | null) => {
+    setNotifOpen(false)
+    const target = link ?? '/leader'
+    navigate(target.startsWith('/owner') ? '/leader' : target)
+  }
 
   return (
     <div className="flex h-full min-h-0 bg-canvas">
@@ -84,8 +100,46 @@ export default function LeaderShell() {
                 ? `${queue.length} awaiting review`
                 : `${(escalations ?? []).length} open`}
             </span>
-            <div className="relative flex h-[38px] w-[38px] items-center justify-center rounded-xl border border-ink/10">
-              <Bell size={18} />
+            <div className="relative">
+              <button
+                onClick={() => {
+                  setNotifOpen((o) => !o)
+                  if (!notifOpen && unread > 0) markRead.mutate()
+                }}
+                className="relative flex h-[38px] w-[38px] items-center justify-center rounded-xl border border-ink/10 bg-white"
+              >
+                <Bell size={18} />
+                {unread > 0 && (
+                  <span className="absolute -right-1 -top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full border-2 border-white bg-danger px-1 text-[10px] font-bold text-white">
+                    {unread}
+                  </span>
+                )}
+              </button>
+              {notifOpen && (
+                <div className="absolute right-0 top-12 z-50 w-[320px] max-w-[calc(100vw-32px)] animate-fade overflow-hidden rounded-2xl border border-ink/10 bg-white shadow-[0_24px_60px_rgba(15,20,32,.18)]">
+                  <div className="flex items-center justify-between border-b border-line px-4 py-3">
+                    <span className="font-display text-sm font-bold">Notifications</span>
+                    <span className="text-[11px] text-muted">{unread} unread</span>
+                  </div>
+                  <div className="max-h-[340px] overflow-y-auto">
+                    {(notifs ?? []).map((nt) => (
+                      <button
+                        key={nt.id}
+                        onClick={() => openNotif(nt.deep_link)}
+                        className={`flex w-full flex-col gap-0.5 border-b border-ink/5 px-4 py-3 text-left hover:bg-canvas ${
+                          !nt.read_at ? 'bg-brand-tint/40' : ''
+                        }`}
+                      >
+                        <span className="text-[12.5px] leading-snug">{nt.title}</span>
+                        <span className="text-[10.5px] text-muted">{timeAgo(nt.created_at)}</span>
+                      </button>
+                    ))}
+                    {(notifs ?? []).length === 0 && (
+                      <div className="p-8 text-center text-xs text-muted">No notifications yet.</div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

@@ -28,27 +28,66 @@ function Splash() {
 }
 
 export default function App() {
-  const { session, profile, loading } = useAuth()
+  const { session, profile, loading, loadError, profileMissing, retry, signOut } = useAuth()
   useRealtimeSync()
   const toast = useToast()
   const qc = useQueryClient()
 
-  // offline queue: flush on reconnect and at startup (PWA-4)
+  // offline queue: flush at startup, on reconnect, on tab focus, and every 60s (PWA-4)
   useEffect(() => {
     if (!session) return
     const flush = async () => {
-      const n = await flushQueue(session.user.id)
-      if (n > 0) {
-        toast(`${n} offline submission${n > 1 ? 's' : ''} synced ✓`)
+      if (!navigator.onLine) return
+      const { flushed } = await flushQueue(session.user.id)
+      if (flushed > 0) {
+        toast(`${flushed} offline submission${flushed > 1 ? 's' : ''} synced ✓`)
         qc.invalidateQueries()
       }
     }
     flush()
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') flush()
+    }
+    const iv = setInterval(flush, 60_000)
     window.addEventListener('online', flush)
-    return () => window.removeEventListener('online', flush)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      clearInterval(iv)
+      window.removeEventListener('online', flush)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
   }, [session?.user.id])
 
   if (loading) return <Splash />
+  if (session && loadError)
+    return (
+      <div className="flex min-h-full flex-col items-center justify-center gap-4 bg-navy p-6 text-center">
+        <div className="text-[17px] font-bold text-white">Couldn't load your account</div>
+        <div className="max-w-[300px] text-[12px] leading-relaxed text-muted">{loadError}</div>
+        <button
+          onClick={retry}
+          className="rounded-xl bg-brand px-6 py-2.5 text-sm font-bold text-white"
+        >
+          Retry
+        </button>
+      </div>
+    )
+  if (session && profileMissing)
+    return (
+      <div className="flex min-h-full flex-col items-center justify-center gap-4 bg-navy p-6 text-center">
+        <div className="text-[17px] font-bold text-white">Your account isn't set up yet</div>
+        <div className="max-w-[300px] text-[12px] leading-relaxed text-muted">
+          You're signed in, but no staff profile exists for this account — ask your manager to set
+          one up.
+        </div>
+        <button
+          onClick={() => signOut()}
+          className="rounded-xl bg-white/10 px-6 py-2.5 text-sm font-bold text-white"
+        >
+          Sign out
+        </button>
+      </div>
+    )
   if (!session || !profile) return <Login />
 
   const home =

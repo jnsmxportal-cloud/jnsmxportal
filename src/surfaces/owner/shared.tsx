@@ -1,9 +1,12 @@
 import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import {
   Check,
   ListChecks,
   Money,
   Paperclip,
+  QrCode,
+  Signature,
   Thermometer,
   Truck,
   Warning,
@@ -17,6 +20,7 @@ import { useReviewTask } from '../../data/hooks'
 import { useToast } from '../../components/Toast'
 import { useAuth } from '../../auth/AuthProvider'
 import { useProfiles } from '../../data/hooks'
+import { evidenceSignedUrl, useEvidence, type EvidenceRow } from '../../data/ownerExtras'
 
 export function kindMeta(t: TaskInstance | { category: TaskCategory; is_temperature_log?: boolean }) {
   if ('is_temperature_log' in t && t.is_temperature_log)
@@ -41,6 +45,115 @@ export function useNames() {
       profiles?.find((p) => p.id === id)?.full_name ?? '—',
     storeName: (id: string) => stores.find((s) => s.id === id)?.name ?? '—',
   }
+}
+
+/**
+ * Single source of truth for compliance maths (Dashboard, Reports, Stores).
+ * submitted / in-review = pending (NOT done) · rejected = issue · completed/approved = done.
+ */
+export function complianceStats(tasks: TaskInstance[]) {
+  const done = tasks.filter((t) => ['completed', 'approved'].includes(t.status)).length
+  const pending = tasks.filter((t) => t.status === 'submitted').length
+  const issues = tasks.filter(
+    (t) =>
+      t.status === 'missed' ||
+      t.status === 'rejected' ||
+      (['assigned', 'in_progress'].includes(t.status) &&
+        t.due_at &&
+        new Date(t.due_at) < new Date()),
+  ).length
+  const pct = done + issues === 0 ? 100 : Math.round((done / (done + issues)) * 100)
+  return { done, pending, issues, pct }
+}
+
+export function storeCompliance(tasks: TaskInstance[], storeId: string): number {
+  return complianceStats(tasks.filter((t) => t.store_id === storeId)).pct
+}
+
+export function EvidencePhoto({ ev }: { ev: EvidenceRow }) {
+  const { data: url } = useQuery({
+    queryKey: ['evidence-url', ev.storage_path],
+    enabled: !!ev.storage_path,
+    staleTime: 240_000,
+    queryFn: () => evidenceSignedUrl(ev.storage_path!),
+  })
+  const isSignature = ev.type === 'signature'
+  return (
+    <button
+      onClick={() => url && window.open(url, '_blank')}
+      title={isSignature ? 'Signature — open full size' : 'Photo evidence — open full size'}
+      className={`overflow-hidden rounded-[11px] border border-ink/10 bg-canvas ${
+        isSignature ? 'h-[74px] w-[130px] bg-white' : 'h-[74px] w-[74px]'
+      }`}
+    >
+      {url ? (
+        <img
+          src={url}
+          alt={isSignature ? 'Signature evidence' : 'Photo evidence'}
+          className={`h-full w-full ${isSignature ? 'object-contain' : 'object-cover'}`}
+        />
+      ) : (
+        <span className="text-[9px] text-muted">…</span>
+      )}
+    </button>
+  )
+}
+
+export function EvidenceGallery({ instanceId }: { instanceId: string }) {
+  const { data: evidence } = useEvidence(instanceId)
+  const rows = evidence ?? []
+  if (rows.length === 0)
+    return (
+      <div className="rounded-[10px] border border-dashed border-ink/15 px-3 py-2.5 text-[11.5px] text-muted">
+        No evidence attached
+      </div>
+    )
+  const photos = rows.filter((e) => e.type === 'photo' && e.storage_path)
+  const signatures = rows.filter((e) => e.type === 'signature' && e.storage_path)
+  const temps = rows.filter((e) => e.type === 'metadata')
+  const qrs = rows.filter((e) => e.type === 'qr')
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {photos.map((e) => (
+        <EvidencePhoto key={e.id} ev={e} />
+      ))}
+      {signatures.map((e) => (
+        <EvidencePhoto key={e.id} ev={e} />
+      ))}
+      {temps.map((e) => {
+        const m = (e.metadata ?? {}) as { unit?: string; value?: number; breach?: boolean }
+        return (
+          <span
+            key={e.id}
+            className={`flex items-center gap-1.5 rounded-[9px] px-2.5 py-[7px] text-[11.5px] font-semibold ${
+              m.breach ? 'bg-danger-soft text-danger' : 'bg-canvas text-slate'
+            }`}
+          >
+            <Thermometer size={13} weight="fill" color={m.breach ? '#E5484D' : '#16B364'} />
+            {m.unit ?? 'Unit'} · {m.value ?? '—'}°C{m.breach ? ' · BREACH' : ''}
+          </span>
+        )
+      })}
+      {qrs.map((e) => {
+        const payload = ((e.metadata ?? {}) as { payload?: string }).payload
+        return (
+          <span
+            key={e.id}
+            title={payload}
+            className="flex max-w-[220px] items-center gap-1.5 rounded-[9px] bg-info-soft px-2.5 py-[7px] text-[11.5px] font-semibold text-[#2563EB]"
+          >
+            <QrCode size={13} weight="fill" /> QR verified
+            {payload && <span className="truncate font-mono text-[10px] font-normal">{payload}</span>}
+          </span>
+        )
+      })}
+      {signatures.length > 0 && (
+        <span className="flex items-center gap-1 text-[10.5px] font-semibold text-success">
+          <Signature size={13} weight="bold" /> Signed
+        </span>
+      )}
+    </div>
+  )
 }
 
 export function evidenceSummary(t: TaskInstance): string {
@@ -123,6 +236,7 @@ export function ApprovalActions({ task, compact }: { task: TaskInstance; compact
           else toast('Reopened · re-assigned instantly with feedback', 'warn')
           setModal(null)
         },
+        onError: (e) => toast(e.message, 'error'),
       },
     )
   }

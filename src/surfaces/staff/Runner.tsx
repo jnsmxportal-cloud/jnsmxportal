@@ -9,6 +9,7 @@ import {
   Signature as SignatureIcon,
 } from '@phosphor-icons/react'
 import { supabase, ORG_ID } from '../../lib/supabase'
+import { compressImage } from '../../lib/image'
 import { useAuth } from '../../auth/AuthProvider'
 import {
   useChecklistItems,
@@ -102,7 +103,10 @@ function ItemRow({
       <div className="flex items-start gap-3">
         <button
           onClick={() =>
-            toggle.mutate({ item, patch: { checked: !item.checked } })
+            toggle.mutate(
+              { item, patch: { checked: !item.checked } },
+              { onError: (e) => toast(e.message, 'error') },
+            )
           }
           className="mt-px flex h-[26px] w-[26px] flex-none items-center justify-center rounded-lg border-2"
           style={{
@@ -127,7 +131,10 @@ function ItemRow({
                 onChange={(e) => setTemp(e.target.value)}
                 onBlur={() => {
                   if (tempNum != null && !Number.isNaN(tempNum))
-                    toggle.mutate({ item, patch: { temp_value: tempNum, checked: true } })
+                    toggle.mutate(
+                      { item, patch: { temp_value: tempNum, checked: true } },
+                      { onError: (e) => toast(e.message, 'error') },
+                    )
                 }}
                 inputMode="decimal"
                 className="w-[74px] rounded-[9px] border p-2 text-center text-sm font-semibold outline-none"
@@ -202,7 +209,7 @@ export default function Runner() {
   const { data: tasks } = useTasks({ storeId: 'all' })
   const instance = (tasks ?? []).find((t) => t.id === id) ?? null
   const { data: items } = useChecklistItems(id ?? null)
-  const { result: geo, checking } = useGeofence(store)
+  const { result: geo, checking, retry } = useGeofence(store)
   const submit = useSubmitChecklist()
   const sig = useSignature()
   const fileRef = useRef<HTMLInputElement>(null)
@@ -214,9 +221,11 @@ export default function Runner() {
   const total = (items ?? []).length
   const progress = total === 0 ? 0 : Math.round((done / total) * 100)
   const requiresSig = instance?.evidence?.signature
+  const noLocation = geo?.verdict === 'unknown'
   const blocked =
-    instance?.geofence_policy === 'block' && geo?.verdict === 'off_site'
-  const canSubmit = total > 0 && done === total && (!requiresSig || sig.signed) && !blocked
+    instance?.geofence_policy === 'block' &&
+    (geo?.verdict === 'off_site' || noLocation)
+  const canSubmit = (total === 0 || done === total) && (!requiresSig || sig.signed) && !blocked
 
   const onPhoto = (item: ChecklistItem) => {
     photoItem.current = item
@@ -226,8 +235,17 @@ export default function Runner() {
   const onFile = async (f: File | undefined) => {
     const item = photoItem.current
     if (!f || !item || !instance) return
+    let compressed: Blob
+    try {
+      compressed = await compressImage(f)
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not process the photo', 'error')
+      return
+    }
     const path = `${ORG_ID}/${instance.id}/${item.id}-${Date.now()}.jpg`
-    const { error } = await supabase.storage.from('evidence').upload(path, f, { upsert: false })
+    const { error } = await supabase.storage
+      .from('evidence')
+      .upload(path, compressed, { upsert: false, contentType: 'image/jpeg' })
     if (error) {
       toast(`Upload failed: ${error.message}`, 'error')
       return
@@ -245,12 +263,47 @@ export default function Runner() {
       gps_accuracy: geo?.accuracy,
       geofence_verdict: geo?.verdict ?? 'unknown',
     })
-    toggle.mutate({ item, patch: { photo_count: item.photo_count + 1, checked: true } })
+    toggle.mutate(
+      { item, patch: { photo_count: item.photo_count + 1, checked: true } },
+      { onError: (e) => toast(e.message, 'error') },
+    )
     toast('Photo captured & stamped', 'success')
   }
 
-  const doSubmit = () => {
+  const doSubmit = async () => {
     if (!instance) return
+    if (requiresSig && sig.signed && sig.ref.current) {
+      try {
+        const canvas = sig.ref.current
+        const blob = await new Promise<Blob>((resolve, reject) =>
+          canvas.toBlob(
+            (b) => (b ? resolve(b) : reject(new Error('Could not capture the signature'))),
+            'image/png',
+          ),
+        )
+        const path = `${ORG_ID}/${instance.id}/signature-${Date.now()}.png`
+        const { error } = await supabase.storage
+          .from('evidence')
+          .upload(path, blob, { contentType: 'image/png' })
+        if (error) throw new Error(error.message)
+        const { error: rowError } = await supabase.from('evidence').insert({
+          org_id: ORG_ID,
+          instance_id: instance.id,
+          type: 'signature',
+          storage_path: path,
+          uploader: session!.user.id,
+          device_ts: new Date().toISOString(),
+          geofence_verdict: geo?.verdict ?? 'unknown',
+        })
+        if (rowError) throw new Error(rowError.message)
+      } catch (e) {
+        toast(
+          `Signature save failed: ${e instanceof Error ? e.message : String(e)}`,
+          'error',
+        )
+        return
+      }
+    }
     submit.mutate(
       {
         instance,
@@ -274,7 +327,23 @@ export default function Runner() {
     )
   }
 
-  if (!instance) return null
+  if (!instance) {
+    if (tasks === undefined) return null
+    return (
+      <div className="flex min-h-full flex-col items-center justify-center gap-2 bg-canvas p-6 text-center">
+        <div className="text-[15px] font-bold">Task not found</div>
+        <div className="text-xs leading-relaxed text-muted">
+          This task is no longer available — it may have been completed or removed.
+        </div>
+        <button
+          onClick={() => navigate('/staff/tasks')}
+          className="mt-2 rounded-[13px] bg-brand px-5 py-3 text-[13.5px] font-bold text-white"
+        >
+          Back to tasks
+        </button>
+      </div>
+    )
+  }
 
   return (
     <div className="flex min-h-full flex-col bg-canvas">
@@ -310,7 +379,19 @@ export default function Runner() {
       <div className="flex-1 p-4">
         {blocked && (
           <div className="mb-3 rounded-[13px] border border-danger/25 bg-danger-soft p-3 text-xs font-medium text-danger">
-            This checklist requires on-premises completion. Move inside the store geofence to submit.
+            {noLocation ? (
+              <>
+                <div>Enable location to submit this task.</div>
+                <button
+                  onClick={retry}
+                  className="mt-2 rounded-[9px] border border-danger/40 bg-white px-3 py-1.5 font-semibold text-danger"
+                >
+                  Retry location
+                </button>
+              </>
+            ) : (
+              'This checklist requires on-premises completion. Move inside the store geofence to submit.'
+            )}
           </div>
         )}
         {(items ?? []).map((it) => (
@@ -345,6 +426,10 @@ export default function Runner() {
             const item = qrItem
             setQrItem(null)
             if (!item || !instance) return
+            if (!payload.startsWith('storeops:') || !payload.includes(instance.store_id)) {
+              toast('Wrong code — scan this store’s QR label', 'error')
+              return
+            }
             await supabase.from('evidence').insert({
               org_id: ORG_ID,
               instance_id: instance.id,
@@ -355,7 +440,10 @@ export default function Runner() {
               device_ts: new Date().toISOString(),
               geofence_verdict: geo?.verdict ?? 'unknown',
             })
-            toggle.mutate({ item, patch: { qr_verified: true, checked: true } })
+            toggle.mutate(
+              { item, patch: { qr_verified: true, checked: true } },
+              { onError: (e) => toast(e.message, 'error') },
+            )
             toast('QR verified · presence confirmed at asset', 'success')
           }}
         />
@@ -369,7 +457,9 @@ export default function Runner() {
           style={{ background: canSubmit ? '#FF5A2D' : '#C3C9D2' }}
         >
           {blocked
-            ? 'Blocked — outside geofence'
+            ? noLocation
+              ? 'Enable location to submit this task'
+              : 'Blocked — outside geofence'
             : canSubmit
               ? 'Submit checklist'
               : `Complete all items${requiresSig ? ' & sign' : ''} to submit`}

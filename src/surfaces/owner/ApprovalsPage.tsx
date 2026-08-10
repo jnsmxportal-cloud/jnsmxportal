@@ -1,9 +1,9 @@
-import { CheckCircle, Image as ImageIcon, Signature, FileText } from '@phosphor-icons/react'
+import { CheckCircle } from '@phosphor-icons/react'
 import { Card, PrioBadge } from '../../components/ui'
 import { useTasks } from '../../data/hooks'
 import { timeAgo } from '../../lib/format'
 import { useOwnerCtx } from './OwnerLayout'
-import { ApprovalActions, evidenceSummary, kindMeta, useNames } from './shared'
+import { ApprovalActions, EvidenceGallery, evidenceSummary, kindMeta, useNames } from './shared'
 
 export default function ApprovalsPage() {
   const { storeId } = useOwnerCtx()
@@ -42,29 +42,8 @@ export default function ApprovalsPage() {
                 {t.submitted_at ? timeAgo(t.submitted_at) : ''}
               </div>
               <div className="mb-3 text-[12.5px] text-slate">{evidenceSummary(t)}</div>
-              <div className="mb-3.5 flex flex-wrap gap-2">
-                {[
-                  t.evidence?.photo && { Icon: ImageIcon, label: 'PHOTOS' },
-                  t.evidence?.signature && { Icon: Signature, label: 'SIGNED' },
-                  { Icon: FileText, label: 'DETAILS' },
-                ]
-                  .filter(Boolean)
-                  .map((e, i) => {
-                    const ev = e as { Icon: typeof ImageIcon; label: string }
-                    return (
-                      <div
-                        key={i}
-                        className="flex h-[74px] w-[74px] flex-col items-center justify-center gap-1 rounded-[11px] border border-ink/5"
-                        style={{
-                          background:
-                            'repeating-linear-gradient(45deg,#eef0f3,#eef0f3 6px,#e4e7ec 6px,#e4e7ec 12px)',
-                        }}
-                      >
-                        <ev.Icon size={19} color="#9aa3b2" />
-                        <span className="font-mono text-[8px] text-[#9aa3b2]">{ev.label}</span>
-                      </div>
-                    )
-                  })}
+              <div className="mb-3.5">
+                <EvidenceGallery instanceId={t.id} />
               </div>
               <ApprovalActions task={t} />
             </div>

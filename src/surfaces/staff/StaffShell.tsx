@@ -24,7 +24,7 @@ import InvoiceUpload from './InvoiceUpload'
 export function useStaffStore() {
   const { stores, myStoreIds } = useAuth()
   return useMemo(
-    () => stores.find((s) => myStoreIds.includes(s.id)) ?? stores[0],
+    () => stores.find((s) => myStoreIds.includes(s.id)),
     [stores, myStoreIds],
   )
 }

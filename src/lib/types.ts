@@ -89,10 +89,11 @@ export interface ChecklistItem {
   position: number
   requires_photo: boolean
   requires_temp: boolean
+  temp_unit_id: string | null
   temp_limit: number | null
-  temp_is_max: boolean
+  temp_is_max: boolean | null
   requires_qr: boolean
-  requires_signature: boolean
+  requires_signature: boolean | null
   checked: boolean
   temp_value: number | null
   photo_count: number
@@ -105,11 +106,16 @@ export interface Delivery {
   store_id: string
   supplier: string
   invoice_no: string | null
+  invoice_date: string | null
   invoice_total: number | null
   discrepancy_units: number
   remarks: string | null
   photo_count: number
   status: DeliveryStatus
+  cost: number | null
+  final_qty: number | null
+  epos_updated: boolean | null
+  stock_shortages: string | null
   submitted_by: string | null
   submitted_at: string
   review_due_at: string | null

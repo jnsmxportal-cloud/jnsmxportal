@@ -16,13 +16,17 @@ import type {
 export function useRealtimeSync() {
   const qc = useQueryClient()
   useEffect(() => {
+    // debounce (400ms trailing) so bursts of changes don't cause a refetch storm
+    let timer: ReturnType<typeof setTimeout> | undefined
     const ch = supabase
       .channel('ops-live')
       .on('postgres_changes', { event: '*', schema: 'public' }, () => {
-        qc.invalidateQueries()
+        clearTimeout(timer)
+        timer = setTimeout(() => qc.invalidateQueries(), 400)
       })
       .subscribe()
     return () => {
+      clearTimeout(timer)
       supabase.removeChannel(ch)
     }
   }, [qc])
@@ -58,9 +62,9 @@ export function useTasks(filter?: { storeId?: string | 'all' }) {
 }
 
 export function useMyTasks() {
-  const { session } = useAuth()
+  const { session, myStoreIds } = useAuth()
   return useQuery({
-    queryKey: ['my-tasks', session?.user.id],
+    queryKey: ['my-tasks', session?.user.id, myStoreIds.join(',')],
     enabled: !!session,
     queryFn: async () => {
       const { data, error } = await supabase
@@ -69,9 +73,11 @@ export function useMyTasks() {
         .in('status', ['scheduled', 'assigned', 'in_progress', 'rejected'])
         .order('due_at', { ascending: true, nullsFirst: false })
       if (error) throw error
-      // assigned to me, my role, or unassigned in my stores
+      // assigned to me, or unassigned in one of my stores
       return (data as TaskInstance[]).filter(
-        (t) => !t.assigned_to || t.assigned_to === session!.user.id,
+        (t) =>
+          t.assigned_to === session!.user.id ||
+          (!t.assigned_to && myStoreIds.includes(t.store_id)),
       )
     },
   })
@@ -171,7 +177,10 @@ import {
   audit,
   enqueueOp,
   notify,
-  owners as ownersAndManagers,
+  pendingOpsCount,
+  reviewerProfiles,
+  reviewers,
+  roleLink,
   submitDeliveryCore,
   submitIncidentCore,
   submitTempLogCore,
@@ -179,6 +188,27 @@ import {
   type IncidentArgs,
   type TempLogArgs,
 } from './ops'
+
+/** Count of queued offline submissions (polls Dexie). */
+export function usePendingOps(): number {
+  const { data } = useQuery({
+    queryKey: ['pending-ops'],
+    queryFn: pendingOpsCount,
+    refetchInterval: 4000,
+  })
+  return data ?? 0
+}
+
+/**
+ * A request that dies mid-flight (offline, DNS, aborted) throws a TypeError /
+ * "Failed to fetch" with no PostgREST `code` — those are safe to queue and retry.
+ * Errors carrying a `code` came back from the API and must surface to the UI.
+ */
+function isNetworkError(e: unknown): boolean {
+  if (e instanceof TypeError) return true
+  if (typeof e === 'object' && e !== null && 'code' in e) return false
+  return true
+}
 
 // ---------- mutations ----------
 export function useReviewTask() {
@@ -275,7 +305,7 @@ export function useVerifyDelivery() {
         })
         .eq('id', args.delivery.id)
       if (error) throw error
-      const mgmt = await ownersAndManagers()
+      const mgmt = await reviewers(['owner'])
       await notify(mgmt, {
         org_id: ORG_ID,
         type: 'delivery',
@@ -317,15 +347,21 @@ export function useSubmitChecklist() {
         })
         .eq('id', args.instance.id)
       if (error) throw error
-      const mgmt = await ownersAndManagers()
-      await notify(mgmt, {
-        org_id: ORG_ID,
-        type: 'submitted',
-        title: `“${args.instance.title}” submitted, awaiting review`,
-        body: null,
-        deep_link: '/owner/approvals',
-        icon: 'seal-check',
-      } as never)
+      const recips = await reviewerProfiles(['owner', 'manager', 'team_leader'])
+      await notify(
+        recips.map((p) => ({
+          id: p.id,
+          deep_link: roleLink(p.role, { mgmt: '/owner/approvals', team_leader: '/leader' }),
+        })),
+        {
+          org_id: ORG_ID,
+          type: 'submitted',
+          title: `“${args.instance.title}” submitted, awaiting review`,
+          body: null,
+          deep_link: '/owner/approvals',
+          icon: 'seal-check',
+        } as never,
+      )
       await audit(uid, 'task.submitted', 'task_instance', args.instance.id, {
         geofence: args.geofenceVerdict,
       })
@@ -339,11 +375,18 @@ export function useSubmitTempLog() {
   const { session } = useAuth()
   return useMutation({
     mutationFn: async (args: TempLogArgs) => {
-      if (!navigator.onLine) {
-        await enqueueOp('temp_log', args)
+      const uid = session!.user.id
+      const queue = async () => {
+        await enqueueOp(uid, 'temp_log', args)
         return { breaches: args.readings.filter((r) => r.value > r.unit.breach_above).length, queued: true }
       }
-      return submitTempLogCore(session!.user.id, args)
+      if (!navigator.onLine) return queue()
+      try {
+        return await submitTempLogCore(uid, args)
+      } catch (e) {
+        if (isNetworkError(e)) return queue()
+        throw e
+      }
     },
     onSuccess: () => qc.invalidateQueries(),
   })
@@ -354,11 +397,18 @@ export function useSubmitDelivery() {
   const { session } = useAuth()
   return useMutation({
     mutationFn: async (args: DeliveryArgs) => {
-      if (!navigator.onLine) {
-        await enqueueOp('delivery', args)
+      const uid = session!.user.id
+      const queue = async () => {
+        await enqueueOp(uid, 'delivery', args)
         return { queued: true }
       }
-      return submitDeliveryCore(session!.user.id, args)
+      if (!navigator.onLine) return queue()
+      try {
+        return await submitDeliveryCore(uid, args)
+      } catch (e) {
+        if (isNetworkError(e)) return queue()
+        throw e
+      }
     },
     onSuccess: () => qc.invalidateQueries(),
   })
@@ -369,11 +419,18 @@ export function useSubmitIncident() {
   const { session } = useAuth()
   return useMutation({
     mutationFn: async (args: IncidentArgs) => {
-      if (!navigator.onLine) {
-        await enqueueOp('incident', args)
+      const uid = session!.user.id
+      const queue = async () => {
+        await enqueueOp(uid, 'incident', args)
         return { queued: true }
       }
-      return submitIncidentCore(session!.user.id, args)
+      if (!navigator.onLine) return queue()
+      try {
+        return await submitIncidentCore(uid, args)
+      } catch (e) {
+        if (isNetworkError(e)) return queue()
+        throw e
+      }
     },
     onSuccess: () => qc.invalidateQueries(),
   })
@@ -450,11 +507,12 @@ export function useMarkNotificationsRead() {
   const { session } = useAuth()
   return useMutation({
     mutationFn: async () => {
-      await supabase
+      const { error } = await supabase
         .from('notifications')
         .update({ read_at: new Date().toISOString() })
         .eq('user_id', session!.user.id)
         .is('read_at', null)
+      if (error) throw error
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['notifications'] }),
   })

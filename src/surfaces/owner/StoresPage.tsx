@@ -1,32 +1,26 @@
+import { useNavigate } from 'react-router-dom'
 import { MapPinArea, QrCode, Storefront, Users } from '@phosphor-icons/react'
 import { Card } from '../../components/ui'
 import { useAuth } from '../../auth/AuthProvider'
 import { useProfiles, useTasks } from '../../data/hooks'
-import { useToast } from '../../components/Toast'
-import type { TaskInstance } from '../../lib/types'
-
-function pct(tasks: TaskInstance[], storeId: string): number {
-  const rel = tasks.filter((t) => t.store_id === storeId)
-  const done = rel.filter((t) => ['completed', 'approved', 'submitted'].includes(t.status)).length
-  const bad = rel.filter(
-    (t) =>
-      t.status === 'missed' ||
-      (['assigned', 'in_progress'].includes(t.status) && t.due_at && new Date(t.due_at) < new Date()),
-  ).length
-  return done + bad === 0 ? 100 : Math.round((done / (done + bad)) * 100)
-}
+import { isOnline, useUserStoreRoles } from '../../data/ownerExtras'
+import { storeCompliance } from './shared'
 
 export default function StoresPage() {
   const { stores } = useAuth()
   const { data: tasks } = useTasks({ storeId: 'all' })
   const { data: profiles } = useProfiles()
-  const toast = useToast()
-  const online = (profiles ?? []).filter((p) => p.is_online).length
+  const { data: storeRoles } = useUserStoreRoles()
+  const navigate = useNavigate()
+  const onlineStaff = (profiles ?? []).filter(isOnline)
 
   return (
     <div className="grid max-w-[960px] animate-fade grid-cols-1 gap-[18px] sm:grid-cols-2 xl:grid-cols-3">
       {stores.map((s) => {
-        const comp = pct(tasks ?? [], s.id)
+        const comp = storeCompliance(tasks ?? [], s.id)
+        const online = onlineStaff.filter((p) =>
+          (storeRoles ?? []).some((r) => r.user_id === p.id && r.store_id === s.id),
+        ).length
         const dot = comp >= 92 ? '#16B364' : comp >= 80 ? '#F59E0B' : '#E5484D'
         return (
           <Card key={s.id} className="overflow-hidden">
@@ -81,7 +75,7 @@ export default function StoresPage() {
                 </div>
               </div>
               <button
-                onClick={() => toast('Geofence & QR editor is on the Sprint-3 roadmap', 'info')}
+                onClick={() => navigate('/owner/admin?tab=geofence')}
                 className="mt-3.5 w-full rounded-[10px] border border-ink/10 bg-canvas p-2 text-xs font-semibold"
               >
                 Edit geofence &amp; QR codes

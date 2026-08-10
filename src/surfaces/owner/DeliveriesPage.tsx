@@ -7,13 +7,16 @@ import { supabase } from '../../lib/supabase'
 import { timeAgo } from '../../lib/format'
 import { useToast } from '../../components/Toast'
 import { useOwnerCtx } from './OwnerLayout'
-import { useNames } from './shared'
+import { EvidencePhoto, useNames } from './shared'
+import { useDeliveryEvidence } from '../../data/ownerExtras'
 import type { Delivery } from '../../lib/types'
 
 function VerifyModal({ delivery, onClose }: { delivery: Delivery; onClose: () => void }) {
   const verify = useVerifyDelivery()
   const toast = useToast()
-  const [cost, setCost] = useState(delivery.invoice_total?.toString() ?? '')
+  const { data: evidence } = useDeliveryEvidence(delivery.id)
+  const photos = (evidence ?? []).filter((e) => e.type === 'photo' && e.storage_path)
+  const [cost, setCost] = useState((delivery.cost ?? delivery.invoice_total)?.toString() ?? '')
   const [qty, setQty] = useState('')
   const [epos, setEpos] = useState(false)
   const [shortages, setShortages] = useState(
@@ -37,6 +40,18 @@ function VerifyModal({ delivery, onClose }: { delivery: Delivery; onClose: () =>
           {delivery.supplier} · Inv #{delivery.invoice_no} — Remote Office step: confirm cost &amp;
           quantity, then it goes to the Owner for approval.
         </div>
+        <label className={label}>Goods photos from the store</label>
+        {photos.length > 0 ? (
+          <div className="mb-3 flex flex-wrap gap-2">
+            {photos.map((e) => (
+              <EvidencePhoto key={e.id} ev={e} />
+            ))}
+          </div>
+        ) : (
+          <div className="mb-3 rounded-[10px] border border-dashed border-ink/15 px-3 py-2.5 text-[11.5px] text-muted">
+            No photos attached to this delivery
+          </div>
+        )}
         <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <label className={label}>Cost per original invoice (£)</label>
@@ -162,10 +177,11 @@ export default function DeliveriesPage() {
       </div>
       {(deliveries ?? []).map((d) => {
         const st = deliveryStatusStyle[d.status]
+        const verified = d.status === 'verified' || d.status === 'approved'
         return (
+          <div key={d.id} className="border-t border-ink/5">
           <div
-            key={d.id}
-            className="grid grid-cols-[1.3fr_1fr_.7fr_.8fr_.9fr_.7fr_auto] items-center gap-3 border-t border-ink/5 px-5 py-[15px] text-[12.5px]"
+            className="grid grid-cols-[1.3fr_1fr_.7fr_.8fr_.9fr_.7fr_auto] items-center gap-3 px-5 py-[15px] text-[12.5px]"
           >
             <span className="font-semibold">{d.supplier}</span>
             <span className="text-slate">{storeName(d.store_id)}</span>
@@ -200,7 +216,10 @@ export default function DeliveriesPage() {
                     onClick={() =>
                       review.mutate(
                         { delivery: d, verdict: 'approved' },
-                        { onSuccess: () => toast('Delivery approved · staged for EPOS sync') },
+                        {
+                          onSuccess: () => toast('Delivery approved · staged for EPOS sync'),
+                          onError: (e) => toast(e.message, 'error'),
+                        },
                       )
                     }
                     className="flex h-8 w-8 items-center justify-center rounded-lg bg-success text-white"
@@ -212,7 +231,10 @@ export default function DeliveriesPage() {
                     onClick={() =>
                       review.mutate(
                         { delivery: d, verdict: 'rejected' },
-                        { onSuccess: () => toast('Delivery rejected · returned to store', 'error') },
+                        {
+                          onSuccess: () => toast('Delivery rejected · returned to store', 'error'),
+                          onError: (e) => toast(e.message, 'error'),
+                        },
                       )
                     }
                     className="flex h-8 w-8 items-center justify-center rounded-lg border border-danger/35 text-danger"
@@ -222,6 +244,32 @@ export default function DeliveriesPage() {
                 </>
               )}
             </span>
+          </div>
+          {verified && (
+            <div className="flex flex-wrap gap-x-5 gap-y-1 bg-canvas/60 px-5 pb-3 pt-1 text-[11.5px] text-slate">
+              <span>
+                Cost{' '}
+                <b className="text-ink">
+                  {d.cost != null ? `£${Number(d.cost).toFixed(2)}` : '—'}
+                </b>
+              </span>
+              <span>
+                Final qty <b className="text-ink">{d.final_qty ?? '—'}</b>
+              </span>
+              <span>
+                EPOS updated{' '}
+                <b className={d.epos_updated ? 'text-success' : 'text-danger'}>
+                  {d.epos_updated ? 'Yes' : 'No'}
+                </b>
+              </span>
+              <span>
+                Shortages{' '}
+                <b className={d.stock_shortages ? 'text-danger' : 'text-ink'}>
+                  {d.stock_shortages ?? 'None'}
+                </b>
+              </span>
+            </div>
+          )}
           </div>
         )
       })}

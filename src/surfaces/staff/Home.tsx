@@ -43,8 +43,6 @@ const grid: { id: string; label: string; Icon: Icon; c: string; b: string }[] = 
 
 export function taskTarget(t: TaskInstance): string {
   if (t.is_temperature_log) return `/staff/temp/${t.id}`
-  if (t.category === 'delivery') return '/staff/delivery'
-  if (t.category === 'incident') return '/staff/incident'
   return `/staff/runner/${t.id}`
 }
 
@@ -117,6 +115,14 @@ export default function Home() {
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
 
+  const tileCategories: Record<string, string> = {
+    cash: 'cash',
+    clean: 'cleaning',
+    maint: 'maintenance',
+    stock: 'stock',
+    note: 'note',
+  }
+
   const openOp = (id: string) => {
     if (id === 'temp') return navigate('/staff/temp')
     if (id === 'delivery') return navigate('/staff/delivery')
@@ -132,11 +138,21 @@ export default function Home() {
       toast('No pending checklist of that type right now', 'info')
       return
     }
+    const category = tileCategories[id]
+    if (category) {
+      const tile = grid.find((g) => g.id === id)
+      return navigate('/staff/new', { state: { title: tile?.label ?? '', category } })
+    }
     navigate('/staff/new')
   }
 
   return (
     <div className="animate-fade px-[18px] pb-5 pt-4">
+      {!store && (
+        <div className="mb-3 rounded-[13px] border border-amber/30 bg-warn-soft p-3 text-xs font-semibold text-amber">
+          No store assigned — ask your manager
+        </div>
+      )}
       <div className="mb-1 flex items-center justify-between">
         <div>
           <div className="text-[12.5px] text-muted">

@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase, ORG_ID } from '../lib/supabase'
 import { useAuth } from '../auth/AuthProvider'
-import { notify } from './ops'
+import { notify, roleLink } from './ops'
+import type { AppRole } from '../lib/types'
 
 export interface Message {
   id: string
@@ -79,12 +80,24 @@ export function useSendMessage() {
         body: args.body,
       })
       if (error) throw error
+      // deep link must match the recipient's surface, not the sender's
+      const { data: recip, error: recipError } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', args.toUser)
+        .maybeSingle()
+      if (recipError) console.warn('message notify: role lookup failed —', recipError.message)
+      const role = ((recip as { role?: AppRole } | null)?.role ?? 'staff') as AppRole
       await notify([args.toUser], {
         org_id: ORG_ID,
         type: 'message',
         title: 'New message',
         body: args.body.slice(0, 120),
-        deep_link: '/staff/inbox',
+        deep_link: roleLink(role, {
+          mgmt: '/owner/inbox',
+          team_leader: '/staff/inbox',
+          staff: '/staff/inbox',
+        }),
         icon: 'chat-circle-dots',
       } as never)
       return threadId
@@ -98,12 +111,13 @@ export function useMarkThreadRead() {
   const { session } = useAuth()
   return useMutation({
     mutationFn: async (threadId: string) => {
-      await supabase
+      const { error } = await supabase
         .from('messages')
         .update({ read_at: new Date().toISOString() })
         .eq('thread_id', threadId)
         .eq('to_user', session!.user.id)
         .is('read_at', null)
+      if (error) throw error
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['messages'] }),
   })

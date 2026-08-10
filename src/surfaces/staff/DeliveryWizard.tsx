@@ -1,15 +1,16 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ArrowLeft,
   Camera,
   Check,
-  CheckCircle,
   MapPin,
   Warning,
+  X,
 } from '@phosphor-icons/react'
 import { useAuth } from '../../auth/AuthProvider'
 import { useSubmitDelivery } from '../../data/hooks'
+import { compressImage } from '../../lib/image'
 import { useToast } from '../../components/Toast'
 import GeoChip, { useGeofence } from './GeoChip'
 import { useStaffStore } from './StaffShell'
@@ -30,26 +31,51 @@ export default function DeliveryWizard() {
   const [invoice, setInvoice] = useState('')
   const [qty, setQty] = useState('')
   const [remarks, setRemarks] = useState('')
-  const [photos, setPhotos] = useState(0)
+  const [photos, setPhotos] = useState<{ blob: Blob; url: string }[]>([])
+  const fileRef = useRef<HTMLInputElement>(null)
 
   const qtyNum = parseInt(qty || '0', 10)
+  const blocked = geo?.verdict === 'off_site'
   const inputCls =
     'w-full rounded-xl border-[1.5px] border-ink/15 bg-white p-3 text-sm outline-none focus:border-brand'
   const label = 'mb-1.5 block text-xs font-semibold text-slate'
+
+  const addPhoto = async (f: File | undefined) => {
+    if (!f) return
+    try {
+      const blob = await compressImage(f)
+      setPhotos((p) => [...p, { blob, url: URL.createObjectURL(blob) }])
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not process the photo', 'error')
+    }
+  }
+
+  const removePhoto = (i: number) => {
+    setPhotos((p) => {
+      URL.revokeObjectURL(p[i].url)
+      return p.filter((_, idx) => idx !== i)
+    })
+  }
 
   const next = () => {
     if (step < 3) {
       setStep(step + 1)
       return
     }
+    if (blocked) return
+    if (!store) {
+      toast('No store assigned to your account', 'error')
+      return
+    }
     submit.mutate(
       {
-        storeId: store!.id,
+        storeId: store.id,
         supplier,
         invoiceNo: invoice,
         discrepancy: Number.isNaN(qtyNum) ? 0 : qtyNum,
         remarks,
-        photoCount: photos,
+        photoCount: photos.length,
+        photos: photos.map((p) => p.blob),
         geofenceVerdict: geo?.verdict ?? 'unknown',
       },
       {
@@ -82,6 +108,17 @@ export default function DeliveryWizard() {
 
   return (
     <div className="flex min-h-full flex-col bg-canvas">
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(e) => {
+          addPhoto(e.target.files?.[0])
+          e.target.value = ''
+        }}
+      />
       <div className="border-b border-line bg-white px-4 pb-3 pt-2">
         <div className="mb-3 flex items-center gap-2.5">
           <button onClick={() => (step === 0 ? navigate('/staff') : setStep(step - 1))} className="p-1">
@@ -150,20 +187,22 @@ export default function DeliveryWizard() {
               Photograph the invoice and the delivered stock.
             </div>
             <div className="grid grid-cols-3 gap-2.5">
-              {Array.from({ length: photos }).map((_, i) => (
+              {photos.map((ph, i) => (
                 <div
-                  key={i}
-                  className="flex aspect-square items-center justify-center rounded-[13px] border border-ink/5"
-                  style={{
-                    background:
-                      'repeating-linear-gradient(45deg,#eef0f3,#eef0f3 6px,#e4e7ec 6px,#e4e7ec 12px)',
-                  }}
+                  key={ph.url}
+                  className="relative aspect-square overflow-hidden rounded-[13px] border border-ink/5"
                 >
-                  <CheckCircle size={24} weight="fill" color="#16B364" />
+                  <img src={ph.url} alt="" className="h-full w-full object-cover" />
+                  <button
+                    onClick={() => removePhoto(i)}
+                    className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-ink/70"
+                  >
+                    <X size={13} weight="bold" color="#fff" />
+                  </button>
                 </div>
               ))}
               <button
-                onClick={() => setPhotos((p) => p + 1)}
+                onClick={() => fileRef.current?.click()}
                 className="flex aspect-square flex-col items-center justify-center gap-1 rounded-[13px] border-[1.5px] border-dashed border-ink/20 bg-[#F9FAFB]"
               >
                 <Camera size={24} color="#8B93A4" />
@@ -211,7 +250,7 @@ export default function DeliveryWizard() {
                 {[
                   ['Supplier', supplier],
                   ['Invoice', invoice ? `#${invoice}` : '—'],
-                  ['Photos', `${photos} captured`],
+                  ['Photos', `${photos.length} captured`],
                 ].map(([k, v]) => (
                   <div key={k} className="flex justify-between">
                     <span className="text-muted">{k}</span>
@@ -278,10 +317,10 @@ export default function DeliveryWizard() {
       <div className="sticky bottom-0 border-t border-line bg-white p-4">
         <button
           onClick={next}
-          disabled={submit.isPending}
+          disabled={submit.isPending || (step === 3 && blocked)}
           className="w-full rounded-[13px] bg-brand p-[15px] text-[15px] font-bold text-white disabled:opacity-60"
         >
-          {step < 3 ? 'Continue' : 'Submit delivery'}
+          {step < 3 ? 'Continue' : blocked ? 'Blocked — outside geofence' : 'Submit delivery'}
         </button>
       </div>
     </div>

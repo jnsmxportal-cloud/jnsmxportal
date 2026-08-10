@@ -7,6 +7,8 @@ import {
 import { useMarkNotificationsRead, useNotifications } from '../../data/hooks'
 import { timeAgo } from '../../lib/format'
 import { useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { useToast } from '../../components/Toast'
 
 const styles: Record<string, { c: string; b: string }> = {
   escalation: { c: '#E5484D', b: '#FCEBEC' },
@@ -24,8 +26,13 @@ const styles: Record<string, { c: string; b: string }> = {
 export default function Alerts() {
   const { data: notifs } = useNotifications()
   const markRead = useMarkNotificationsRead()
+  const navigate = useNavigate()
+  const toast = useToast()
   useEffect(() => {
-    const t = setTimeout(() => markRead.mutate(), 1200)
+    const t = setTimeout(
+      () => markRead.mutate(undefined, { onError: (e) => toast(e.message, 'error') }),
+      1200,
+    )
     return () => clearTimeout(t)
   }, [])
 
@@ -44,7 +51,13 @@ export default function Alerts() {
                   ? ClockCountdown
                   : WarningOctagon
           return (
-            <div key={n.id} className="flex gap-3 rounded-[14px] border border-line bg-white p-[13px]">
+            <button
+              key={n.id}
+              onClick={() =>
+                navigate(n.deep_link?.startsWith('/staff') ? n.deep_link : '/staff/tasks')
+              }
+              className="flex gap-3 rounded-[14px] border border-line bg-white p-[13px] text-left"
+            >
               <div
                 className="flex h-9 w-9 flex-none items-center justify-center rounded-[10px]"
                 style={{ background: s.b }}
@@ -57,7 +70,7 @@ export default function Alerts() {
                 <div className="mt-1 text-[10.5px] text-muted">{timeAgo(n.created_at)}</div>
               </div>
               {!n.read_at && <span className="mt-1 h-2 w-2 flex-none rounded-full bg-brand" />}
-            </div>
+            </button>
           )
         })}
         {(notifs ?? []).length === 0 && (
