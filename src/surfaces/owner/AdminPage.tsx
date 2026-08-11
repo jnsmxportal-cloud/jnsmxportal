@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import QRCode from 'qrcode'
 import {
+  ArrowsClockwise,
   Check,
   Crosshair,
   MapPin,
+  Password,
   PencilSimple,
   Plus,
   Printer,
@@ -28,6 +30,7 @@ import {
   useUserStoreRoles,
   type TaskTemplate,
 } from '../../data/admin'
+import { useKioskAdmin, useKioskCodes } from '../../data/rota'
 import { useToast } from '../../components/Toast'
 import TemplateEditor from './TemplateEditor'
 import type { AppRole, Profile, Store } from '../../lib/types'
@@ -117,6 +120,58 @@ function TemplatesPanel() {
 }
 
 // ================= Users =================
+function KioskCodeChip({
+  code,
+  busy,
+  onGenerate,
+  onClear,
+}: {
+  code: string | null
+  busy: boolean
+  onGenerate: () => void
+  onClear: () => void
+}) {
+  const [visible, setVisible] = useState(false)
+  if (!code)
+    return (
+      <button
+        onClick={onGenerate}
+        disabled={busy}
+        className="flex items-center gap-1.5 rounded-lg bg-brand-tint px-3 py-1.5 text-xs font-semibold text-brand-dark disabled:opacity-50"
+        title="Issue a 6-digit kiosk sign-in code"
+      >
+        <Password size={13} /> Issue code
+      </button>
+    )
+  return (
+    <div className="flex items-center gap-1">
+      <button
+        onClick={() => setVisible((v) => !v)}
+        className="rounded-lg border border-ink/15 bg-canvas px-2.5 py-1.5 font-mono text-xs font-bold tracking-[.15em] text-ink"
+        title={visible ? 'Hide code' : 'Show code'}
+      >
+        {visible ? code : '••••••'}
+      </button>
+      <button
+        onClick={onGenerate}
+        disabled={busy}
+        className="rounded-lg p-1.5 text-slate disabled:opacity-50"
+        title="Regenerate code"
+      >
+        <ArrowsClockwise size={14} />
+      </button>
+      <button
+        onClick={onClear}
+        disabled={busy}
+        className="rounded-lg p-1.5 text-danger disabled:opacity-50"
+        title="Remove code"
+      >
+        <Trash size={14} />
+      </button>
+    </div>
+  )
+}
+
 function UserModal({ user, onClose }: { user: Profile | null; onClose: () => void }) {
   const { stores } = useAuth()
   const { data: usr } = useUserStoreRoles()
@@ -201,14 +256,18 @@ function UserModal({ user, onClose }: { user: Profile | null; onClose: () => voi
 function UsersPanel() {
   const { data: profiles } = useProfiles()
   const { data: usr } = useUserStoreRoles()
-  const { stores } = useAuth()
+  const { stores, profile: me } = useAuth()
   const [modal, setModal] = useState<Profile | null | 'new'>(null)
+  const isOwner = me?.role === 'owner'
+  const { data: kioskCodes } = useKioskCodes(isOwner)
+  const kiosk = useKioskAdmin()
+  const toast = useToast()
 
   return (
     <div>
       <div className="mb-3.5 flex items-center justify-between">
         <div className="text-[12.5px] text-muted">
-          {(profiles ?? []).length} team members · accounts are created with a temporary password
+          {(profiles ?? []).length} team members · staff codes give one-tap kiosk sign-in
         </div>
         <button
           onClick={() => setModal('new')}
@@ -240,6 +299,30 @@ function UsersPanel() {
                   {p.role === 'owner' ? ' · all stores' : myStores.length ? ` · ${myStores.join(', ')}` : ' · no store assigned'}
                 </div>
               </div>
+              {isOwner && (
+                <KioskCodeChip
+                  code={(kioskCodes ?? []).find((k) => k.user_id === p.id)?.code ?? null}
+                  busy={kiosk.isPending && kiosk.variables?.user_id === p.id}
+                  onGenerate={() =>
+                    kiosk.mutate(
+                      { action: 'set', user_id: p.id },
+                      {
+                        onSuccess: (r) => toast(`Staff code for ${p.full_name}: ${r.code}`),
+                        onError: (e) => toast(e.message, 'error'),
+                      },
+                    )
+                  }
+                  onClear={() =>
+                    kiosk.mutate(
+                      { action: 'clear', user_id: p.id },
+                      {
+                        onSuccess: () => toast(`Staff code removed for ${p.full_name}`),
+                        onError: (e) => toast(e.message, 'error'),
+                      },
+                    )
+                  }
+                />
+              )}
               <button
                 onClick={() => setModal(p)}
                 className="flex items-center gap-1.5 rounded-lg border border-ink/15 px-3 py-1.5 text-xs font-semibold text-slate"

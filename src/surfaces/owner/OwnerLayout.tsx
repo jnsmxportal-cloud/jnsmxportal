@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate, useOutletContext } from 'react-router-dom'
 import {
   Bell,
+  CalendarBlank,
   ClockCountdown,
   MapPin,
   Plus,
@@ -60,6 +61,7 @@ const navDefs: {
   { to: '/owner/deliveries', label: 'Deliveries', icon: Truck },
   { to: '/owner/escalations', label: 'Escalations', icon: WarningOctagon, badge: 'escalations' },
   { to: '/owner/inbox', label: 'Inbox', icon: ChatCircleDots, badge: 'inbox' },
+  { to: '/owner/rota', label: 'Rota', icon: CalendarBlank },
   { to: '/owner/reports', label: 'Reports', icon: ChartBar },
   { to: '/owner/stores', label: 'Stores & geofence', icon: MapPin },
   { to: '/owner/admin', label: 'Admin', icon: GearSix, ownerOnly: true },
@@ -71,6 +73,7 @@ const titles: Record<string, string> = {
   '/owner/deliveries': 'Deliveries',
   '/owner/escalations': 'Escalations',
   '/owner/inbox': 'Inbox',
+  '/owner/rota': 'Rota & shifts',
   '/owner/reports': 'Reports & analytics',
   '/owner/stores': 'Stores & geofence',
   '/owner/admin': 'Admin',

@@ -16,6 +16,7 @@ import ReportsPage from './surfaces/owner/ReportsPage'
 import StoresPage from './surfaces/owner/StoresPage'
 import InboxPage from './surfaces/owner/InboxPage'
 import AdminPage from './surfaces/owner/AdminPage'
+import RotaPage from './surfaces/owner/RotaPage'
 import StaffShell from './surfaces/staff/StaffShell'
 import LeaderShell from './surfaces/leader/LeaderShell'
 
@@ -105,6 +106,7 @@ export default function App() {
           <Route path="approvals" element={<ApprovalsPage />} />
           <Route path="deliveries" element={<DeliveriesPage />} />
           <Route path="escalations" element={<EscalationsPage />} />
+          <Route path="rota" element={<RotaPage />} />
           <Route path="reports" element={<ReportsPage />} />
           <Route path="stores" element={<StoresPage />} />
           <Route path="inbox" element={<InboxPage />} />

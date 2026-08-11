@@ -148,6 +148,19 @@ export interface Escalation {
   created_at: string
 }
 
+export interface Shift {
+  id: string
+  org_id: string
+  store_id: string
+  user_id: string
+  starts_at: string
+  ends_at: string
+  role_note: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
 export interface AppNotification {
   id: string
   user_id: string

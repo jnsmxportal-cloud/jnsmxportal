@@ -1,10 +1,17 @@
 import { useEffect, useState } from 'react'
-import { ArrowsClockwise, BellRinging, DownloadSimple, SignOut } from '@phosphor-icons/react'
+import {
+  ArrowsClockwise,
+  BellRinging,
+  CalendarBlank,
+  DownloadSimple,
+  SignOut,
+} from '@phosphor-icons/react'
 import { useAuth } from '../../auth/AuthProvider'
 import { Avatar } from '../../components/ui'
 import { useStaffStore } from './StaffShell'
 import { useToast } from '../../components/Toast'
 import { usePendingOps } from '../../data/hooks'
+import { useMyShifts } from '../../data/rota'
 import { enablePush, isPushEnabled } from '../../lib/push'
 import { iosNeedsInstallForPush } from '../../lib/ios'
 
@@ -19,6 +26,7 @@ export default function Profile() {
   const [installEvt, setInstallEvt] = useState<BeforeInstallPromptEvent | null>(null)
   const [pushOn, setPushOn] = useState(false)
   const pending = usePendingOps()
+  const { data: myShifts } = useMyShifts(profile?.id)
 
   useEffect(() => {
     isPushEnabled().then(setPushOn)
@@ -54,6 +62,46 @@ export default function Profile() {
             {store ? ` · ${store.name}${store.city ? `, ${store.city}` : ''}` : ''}
           </div>
         </div>
+      </div>
+
+      <div className="mb-3.5 rounded-2xl border border-line bg-white p-[15px]">
+        <div className="mb-2.5 flex items-center gap-2 text-[13px] font-bold">
+          <CalendarBlank size={16} color="#FF5A2D" weight="fill" /> My shifts · next 7 days
+        </div>
+        {(myShifts ?? []).length === 0 ? (
+          <div className="text-xs text-muted">No shifts scheduled — check with your manager.</div>
+        ) : (
+          <div className="flex flex-col gap-1.5">
+            {(myShifts ?? []).map((s) => {
+              const d = new Date(s.starts_at)
+              const isToday = d.toDateString() === new Date().toDateString()
+              return (
+                <div
+                  key={s.id}
+                  className={`flex items-center justify-between rounded-xl px-3 py-2 text-[12.5px] ${
+                    isToday ? 'bg-brand-tint font-semibold text-brand-dark' : 'bg-canvas text-ink'
+                  }`}
+                >
+                  <span>
+                    {isToday
+                      ? 'Today'
+                      : d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}
+                    {s.role_note ? ` · ${s.role_note}` : ''}
+                  </span>
+                  <span className="font-semibold">
+                    {d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}
+                    –
+                    {new Date(s.ends_at).toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      hour12: false,
+                    })}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       <div className="mb-3.5 rounded-2xl bg-navy p-4 text-white">
