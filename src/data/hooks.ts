@@ -8,8 +8,11 @@ import type {
   Delivery,
   Escalation,
   Profile,
+  EvidenceReqs,
   StoreUnit,
+  TaskCategory,
   TaskInstance,
+  TaskPriority,
 } from '../lib/types'
 
 // ---------- realtime: invalidate on any change ----------
@@ -436,19 +439,26 @@ export function useSubmitIncident() {
   })
 }
 
+export interface CreateTaskArgs {
+  title: string
+  storeIds: string[]
+  assignedTo: string | null
+  dueAt: string | null
+  priority: TaskPriority
+  category: TaskCategory
+  evidence: EvidenceReqs
+  /** when set, the instance is linked to the template and the DB trigger expands its checklist */
+  templateId?: string | null
+  description?: string | null
+  geofencePolicy?: 'none' | 'flag' | 'block'
+  isTemperatureLog?: boolean
+}
+
 export function useCreateTask() {
   const qc = useQueryClient()
   const { session } = useAuth()
   return useMutation({
-    mutationFn: async (args: {
-      title: string
-      storeIds: string[]
-      assignedTo: string | null
-      dueAt: string | null
-      priority: 'low' | 'medium' | 'high'
-      category: string
-      evidence: Record<string, boolean>
-    }) => {
+    mutationFn: async (args: CreateTaskArgs) => {
       const uid = session!.user.id
       const { data, error } = await supabase
         .from('task_instances')
@@ -456,11 +466,15 @@ export function useCreateTask() {
           args.storeIds.map((sid) => ({
             org_id: ORG_ID,
             store_id: sid,
+            template_id: args.templateId ?? null,
             title: args.title,
+            description: args.description ?? null,
             category: args.category,
             priority: args.priority,
             status: 'assigned',
             evidence: args.evidence,
+            geofence_policy: args.geofencePolicy ?? 'none',
+            is_temperature_log: args.isTemperatureLog ?? false,
             due_at: args.dueAt,
             assigned_to: args.assignedTo,
           })),
@@ -479,6 +493,7 @@ export function useCreateTask() {
       }
       await audit(uid, 'task.created', 'task_instance', (data as { id: string }[])[0]?.id ?? '', {
         stores: args.storeIds.length,
+        template_id: args.templateId ?? null,
       })
     },
     onSuccess: () => qc.invalidateQueries(),

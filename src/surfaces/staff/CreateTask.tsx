@@ -5,8 +5,9 @@ import { useAuth } from '../../auth/AuthProvider'
 import { useCreateTask } from '../../data/hooks'
 import { useToast } from '../../components/Toast'
 import { useStaffStore } from './StaffShell'
+import type { TaskCategory } from '../../lib/types'
 
-const types = [
+const types: { label: string; cat: TaskCategory }[] = [
   { label: 'Checklist', cat: 'daily' },
   { label: 'Cleaning', cat: 'weekly' },
   { label: 'Maintenance', cat: 'maintenance' },
@@ -25,7 +26,9 @@ export default function CreateTask() {
   const [type, setType] = useState(
     () => types.find((t) => t.cat === prefill.category) ?? types[0],
   )
-  const [category, setCategory] = useState(prefill.category ?? types[0].cat)
+  const [category, setCategory] = useState<TaskCategory>(
+    types.find((t) => t.cat === prefill.category)?.cat ?? types[0].cat,
+  )
   const [prio, setPrio] = useState<(typeof prios)[number]>('medium')
   const [due, setDue] = useState('')
 
