@@ -66,6 +66,7 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
   const [due, setDue] = useState<string>('')
   const [prio, setPrio] = useState<TaskPriority>('medium')
   const [evidence, setEvidence] = useState<Record<string, boolean>>({})
+  const [needsReview, setNeedsReview] = useState(true)
 
   const template =
     templateId === CUSTOM ? null : ((templates ?? []).find((t) => t.id === templateId) ?? null)
@@ -91,6 +92,7 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
     setCategory(t.category)
     setPrio(t.priority)
     setEvidence({ ...(t.evidence as Record<string, boolean>) })
+    setNeedsReview(t.requires_approval ?? true)
   }
 
   const onStoreChange = (v: string) => {
@@ -128,6 +130,7 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
         description: description.trim() || null,
         geofencePolicy: template?.geofence_policy ?? 'none',
         isTemperatureLog: template?.is_temperature_log ?? false,
+        requiresApproval: needsReview,
       },
       {
         onSuccess: () => {
@@ -304,6 +307,23 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
                   {p}
                 </button>
               ))}
+            </div>
+          </div>
+
+          <div>
+            <label className={label}>After submit</label>
+            <div className="flex flex-wrap gap-1.5">
+              <button onClick={() => setNeedsReview(true)} className={chip(needsReview)}>
+                Needs review
+              </button>
+              <button onClick={() => setNeedsReview(false)} className={chip(!needsReview)}>
+                Completes immediately
+              </button>
+            </div>
+            <div className="mt-1.5 text-[11.5px] text-muted">
+              {needsReview
+                ? 'Goes to the approvals queue for a Team Leader, Manager or Owner to sign off.'
+                : 'Marked completed as soon as staff submit — no sign-off step.'}
             </div>
           </div>
 

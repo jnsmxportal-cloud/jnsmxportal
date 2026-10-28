@@ -76,12 +76,15 @@ export async function submitTempLogCore(uid: string, args: TempLogArgs, deviceTs
   const ts = deviceTs ?? new Date().toISOString()
   let instanceId = args.instance?.id
   if (instanceId) {
+    // templates can opt out of review: the log completes straight away
+    const autoComplete = args.instance?.requires_approval === false
     const { error } = await supabase
       .from('task_instances')
       .update({
-        status: 'submitted',
+        status: autoComplete ? 'completed' : 'submitted',
         submitted_at: ts,
         submitted_by: uid,
+        ...(autoComplete ? { completed_at: ts } : {}),
         geofence_verdict: args.geofenceVerdict,
       })
       .eq('id', instanceId)

@@ -337,12 +337,16 @@ export function useSubmitChecklist() {
       gps?: { lat?: number; lng?: number; accuracy?: number }
     }) => {
       const uid = session!.user.id
+      const ts = new Date().toISOString()
+      // templates can opt out of review: the submit completes the task straight away
+      const autoComplete = args.instance.requires_approval === false
       const { error } = await supabase
         .from('task_instances')
         .update({
-          status: 'submitted',
-          submitted_at: new Date().toISOString(),
+          status: autoComplete ? 'completed' : 'submitted',
+          submitted_at: ts,
           submitted_by: uid,
+          ...(autoComplete ? { completed_at: ts } : {}),
           geofence_verdict: args.geofenceVerdict,
           gps_lat: args.gps?.lat ?? null,
           gps_lng: args.gps?.lng ?? null,
@@ -350,6 +354,13 @@ export function useSubmitChecklist() {
         })
         .eq('id', args.instance.id)
       if (error) throw error
+      if (autoComplete) {
+        await audit(uid, 'task.completed', 'task_instance', args.instance.id, {
+          geofence: args.geofenceVerdict,
+          auto_approved: true,
+        })
+        return
+      }
       const recips = await reviewerProfiles(['owner', 'manager', 'team_leader'])
       await notify(
         recips.map((p) => ({
@@ -452,6 +463,8 @@ export interface CreateTaskArgs {
   description?: string | null
   geofencePolicy?: 'none' | 'flag' | 'block'
   isTemperatureLog?: boolean
+  /** omit to inherit from the template (DB trigger); custom tasks default to true */
+  requiresApproval?: boolean
 }
 
 export function useCreateTask() {
@@ -475,6 +488,7 @@ export function useCreateTask() {
             evidence: args.evidence,
             geofence_policy: args.geofencePolicy ?? 'none',
             is_temperature_log: args.isTemperatureLog ?? false,
+            requires_approval: args.requiresApproval ?? null,
             due_at: args.dueAt,
             assigned_to: args.assignedTo,
           })),

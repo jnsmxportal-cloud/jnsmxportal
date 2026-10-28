@@ -69,6 +69,8 @@ export interface TaskInstance {
   evidence: EvidenceReqs
   geofence_policy: 'none' | 'flag' | 'block'
   is_temperature_log: boolean
+  /** false = submit completes immediately, no reviewer sign-off */
+  requires_approval: boolean
   due_at: string | null
   cutoff_at: string | null
   assigned_to: string | null

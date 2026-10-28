@@ -316,10 +316,12 @@ export default function Runner() {
             state: {
               icon: 'seal',
               color: '#16B364',
-              title: 'Checklist submitted',
-              msg: `Locked & sent to your Team Leader for verification.${
-                geo?.verdict === 'verified' ? ' Evidence stamped ✓ Verified on-site.' : ''
-              }`,
+              title: instance.requires_approval === false ? 'Checklist completed' : 'Checklist submitted',
+              msg: `${
+                instance.requires_approval === false
+                  ? 'Logged and archived — no review needed for this task.'
+                  : 'Locked & sent to your Team Leader for verification.'
+              }${geo?.verdict === 'verified' ? ' Evidence stamped ✓ Verified on-site.' : ''}`,
             },
           }),
         onError: (e) => toast(e.message, 'error'),
