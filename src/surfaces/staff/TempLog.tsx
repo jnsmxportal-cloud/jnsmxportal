@@ -69,8 +69,16 @@ export default function TempLog() {
                 : {
                     icon: 'seal',
                     color: '#16B364',
-                    title: 'Temperature log submitted',
-                    msg: 'All readings within safe limits. Stamped ✓ Verified on-site and archived for compliance.',
+                    // mirrors the checklist runner: say what actually happened to the log
+                    title:
+                      instance?.requires_approval === false
+                        ? 'Temperature log completed'
+                        : 'Temperature log submitted',
+                    msg: `All readings within safe limits. ${
+                      instance?.requires_approval === false
+                        ? 'Logged and archived — no review needed for this log.'
+                        : 'Locked & sent to your Team Leader for verification.'
+                    }${geo?.verdict === 'verified' ? ' Evidence stamped ✓ Verified on-site.' : ''}`,
                   },
           })
         },
