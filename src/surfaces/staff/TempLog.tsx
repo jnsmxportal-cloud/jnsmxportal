@@ -97,13 +97,6 @@ export default function TempLog() {
       </div>
 
       <div className="flex-1 p-4">
-        <GeoNotice
-          result={geo}
-          checking={checking}
-          storeName={store?.name}
-          onRetry={retry}
-          tone={blocked ? 'danger' : 'warn'}
-        />
         {hasFail && (
           <div className="mb-3.5 flex gap-2.5 rounded-[13px] border border-danger/25 bg-danger-soft p-3">
             <WarningOctagon size={20} weight="fill" color="#E5484D" className="flex-none" />
@@ -154,6 +147,13 @@ export default function TempLog() {
       </div>
 
       <div className="sticky bottom-0 border-t border-line bg-white p-4">
+        <GeoNotice
+          result={geo}
+          checking={checking}
+          storeName={store?.name}
+          onRetry={retry}
+          tone={blocked ? 'danger' : 'warn'}
+        />
         <button
           onClick={doSubmit}
           disabled={!allFilled || blocked || submit.isPending}

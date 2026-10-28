@@ -379,18 +379,6 @@ export default function Runner() {
       </div>
 
       <div className="flex-1 p-4">
-        {blocked && (
-          <div className="mb-1 text-[11px] font-semibold text-danger">
-            This checklist must be completed on the premises.
-          </div>
-        )}
-        <GeoNotice
-          result={geo}
-          checking={checking}
-          storeName={store?.name}
-          onRetry={retry}
-          tone={blocked ? 'danger' : 'warn'}
-        />
         {(items ?? []).map((it) => (
           <ItemRow key={it.id} item={it} onPhoto={onPhoto} onQr={setQrItem} />
         ))}
@@ -447,6 +435,19 @@ export default function Runner() {
       )}
 
       <div className="sticky bottom-0 border-t border-line bg-white p-4">
+        {/* location notice sits with the action it gates, so the checklist never shifts under a tap */}
+        {blocked && (
+          <div className="mb-1.5 text-[11px] font-semibold text-danger">
+            This checklist must be completed on the premises.
+          </div>
+        )}
+        <GeoNotice
+          result={geo}
+          checking={checking}
+          storeName={store?.name}
+          onRetry={retry}
+          tone={blocked ? 'danger' : 'warn'}
+        />
         <button
           onClick={doSubmit}
           disabled={!canSubmit || submit.isPending}

@@ -144,13 +144,6 @@ export default function DeliveryWizard() {
       </div>
 
       <div className="flex-1 p-4">
-        <GeoNotice
-          result={geo}
-          checking={checking}
-          storeName={store?.name}
-          onRetry={retry}
-          tone={blocked ? 'danger' : 'warn'}
-        />
         {step === 0 && (
           <div className="flex flex-col gap-3.5">
             <div>
@@ -322,6 +315,13 @@ export default function DeliveryWizard() {
       </div>
 
       <div className="sticky bottom-0 border-t border-line bg-white p-4">
+        <GeoNotice
+          result={geo}
+          checking={checking}
+          storeName={store?.name}
+          onRetry={retry}
+          tone={blocked ? 'danger' : 'warn'}
+        />
         <button
           onClick={next}
           disabled={submit.isPending || (step === 3 && blocked)}

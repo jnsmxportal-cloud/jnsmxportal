@@ -107,7 +107,7 @@ export function GeoNotice({
       ? `You are about ${formatDistance(result.distanceM ?? 0)} from ${storeName || 'the store'}. Move inside the store to be verified on-site, then retry.`
       : geoReasonHelp(result.reason, storeName)
   return (
-    <div className={`mb-3.5 flex items-center justify-between gap-2.5 rounded-[13px] border p-3 ${box}`}>
+    <div className={`mb-3 flex items-center justify-between gap-2.5 rounded-[13px] border p-2.5 ${box}`}>
       <div className="text-[11.5px] font-medium leading-snug">{text}</div>
       {onRetry && (
         <button
