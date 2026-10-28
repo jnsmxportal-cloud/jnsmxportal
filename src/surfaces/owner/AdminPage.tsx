@@ -8,17 +8,19 @@ import {
   MapPin,
   Password,
   PencilSimple,
+  Play,
   Plus,
   Printer,
   QrCode as QrIcon,
   Thermometer,
   Trash,
   Users as UsersIcon,
+  Warning,
   X,
 } from '@phosphor-icons/react'
 import { Avatar, Card } from '../../components/ui'
 import { useAuth } from '../../auth/AuthProvider'
-import { useProfiles, useStoreUnits } from '../../data/hooks'
+import { useCreateTask, useProfiles, useStoreUnits, useTasks } from '../../data/hooks'
 import {
   recurrenceSummary,
   useAdminUsers,
@@ -32,9 +34,10 @@ import {
 } from '../../data/admin'
 import { useKioskAdmin, useKioskCodes } from '../../data/rota'
 import { geoErrorReason, geoReasonHelp } from '../../lib/geo'
+import { timeAgo } from '../../lib/format'
 import { useToast } from '../../components/Toast'
 import TemplateEditor from './TemplateEditor'
-import type { AppRole, Profile, Store } from '../../lib/types'
+import type { AppRole, Profile, Store, TaskInstance } from '../../lib/types'
 
 const tabs = ['Templates', 'Users', 'Units', 'QR codes', 'Geofence'] as const
 type Tab = (typeof tabs)[number]
@@ -59,12 +62,96 @@ function templateScopeLabel(t: TaskTemplate, stores: Store[]): string {
   return names.length <= 2 ? names.join(' + ') : `${names.length} stores`
 }
 
+/** store ids a template is scoped to ([] = chain-wide) */
+function templateStoreIds(t: TaskTemplate): string[] {
+  return t.store_ids?.length ? t.store_ids : t.store_id ? [t.store_id] : []
+}
+
+/** Why a scheduled template can never produce a task, or null when it can. */
+function scheduleProblem(t: TaskTemplate): string | null {
+  const r = t.recurrence
+  if (!r) return null
+  if ((r.freq === 'daily' || r.freq === 'weekly') && !r.times?.length)
+    return 'No time of day set, so the scheduler will never generate this task.'
+  if (r.freq === 'weekly' && !r.byweekday?.length)
+    return 'No weekday selected, so the scheduler will never generate this task.'
+  return null
+}
+
+interface TemplateStats {
+  total: number
+  open: number
+  review: number
+  done: number
+  missed: number
+  last: string | null
+}
+
+/** Aggregate instances per template (instances carry template_id, so this is a client-side group-by). */
+function templateStats(tasks: TaskInstance[] | undefined): Record<string, TemplateStats> {
+  const out: Record<string, TemplateStats> = {}
+  for (const t of tasks ?? []) {
+    if (!t.template_id) continue
+    const s = (out[t.template_id] ??= { total: 0, open: 0, review: 0, done: 0, missed: 0, last: null })
+    s.total++
+    if (t.status === 'submitted') s.review++
+    else if (t.status === 'completed' || t.status === 'approved') s.done++
+    else if (t.status === 'missed') s.missed++
+    else s.open++
+    if (!s.last || t.created_at > s.last) s.last = t.created_at
+  }
+  return out
+}
+
 function TemplatesPanel() {
   const { data: templates } = useTemplates()
+  const { data: tasks } = useTasks({ storeId: 'all' })
   const { stores } = useAuth()
   const del = useDeleteTemplate()
+  const create = useCreateTask()
   const toast = useToast()
   const [editing, setEditing] = useState<TaskTemplate | null | 'new'>(null)
+  // template id awaiting "Run now" confirmation
+  const [runConfirm, setRunConfirm] = useState<string | null>(null)
+  const stats = templateStats(tasks)
+
+  const runNow = (t: TaskTemplate) => {
+    const scope = templateStoreIds(t)
+    const storeIds = scope.length
+      ? scope.filter((id) => stores.some((s) => s.id === id))
+      : stores.map((s) => s.id)
+    if (storeIds.length === 0) {
+      toast('No store matches the scope of this template', 'error')
+      return
+    }
+    create.mutate(
+      {
+        title: t.title,
+        storeIds,
+        assignedTo: null,
+        dueAt: null,
+        priority: t.priority,
+        category: t.category,
+        evidence: t.evidence,
+        templateId: t.id,
+        description: t.description,
+        geofencePolicy: t.geofence_policy,
+        isTemperatureLog: t.is_temperature_log,
+        // requires_approval is inherited from the template by the DB trigger
+      },
+      {
+        onSuccess: () => {
+          setRunConfirm(null)
+          const where =
+            storeIds.length === stores.length
+              ? 'all stores'
+              : `${storeIds.length} store${storeIds.length === 1 ? '' : 's'}`
+          toast(`“${t.title}” created for ${where} · unassigned, no due time`)
+        },
+        onError: (e) => toast(e.message, 'error'),
+      },
+    )
+  }
 
   return (
     <div>
@@ -99,7 +186,69 @@ function TemplatesPanel() {
                 {templateScopeLabel(t, stores)} ·{' '}
                 {t.checklist.length} items
               </div>
+              {(() => {
+                const s = stats[t.id]
+                if (!s)
+                  return (
+                    <div className="mt-1 text-[11.5px] text-muted">
+                      No tasks generated yet
+                      {!t.recurrence ? ' (use Run now or the dashboard New task button)' : ''}
+                    </div>
+                  )
+                return (
+                  <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11.5px]">
+                    <span className="text-muted">Last run {s.last ? timeAgo(s.last) : '—'} ·</span>
+                    <span className="font-semibold text-slate">{s.total} created</span>
+                    {s.open > 0 && (
+                      <span className="rounded-full bg-[#EAF1FE] px-2 py-px font-semibold text-[#3B82F6]">{s.open} open</span>
+                    )}
+                    {s.review > 0 && (
+                      <span className="rounded-full bg-warn-soft px-2 py-px font-semibold text-amber">{s.review} awaiting review</span>
+                    )}
+                    {s.done > 0 && (
+                      <span className="rounded-full bg-success-soft px-2 py-px font-semibold text-success-deep">{s.done} completed</span>
+                    )}
+                    {s.missed > 0 && (
+                      <span className="rounded-full bg-danger-soft px-2 py-px font-semibold text-danger">{s.missed} missed</span>
+                    )}
+                  </div>
+                )
+              })()}
+              {scheduleProblem(t) && (
+                <div className="mt-1 flex items-center gap-1 text-[11.5px] font-semibold text-danger">
+                  <Warning size={13} weight="fill" /> {scheduleProblem(t)}
+                </div>
+              )}
             </div>
+            {runConfirm === t.id ? (
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11.5px] text-slate">
+                  Create for {templateStoreIds(t).length || stores.length} store
+                  {(templateStoreIds(t).length || stores.length) === 1 ? '' : 's'}?
+                </span>
+                <button
+                  onClick={() => runNow(t)}
+                  disabled={create.isPending}
+                  className="rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+                >
+                  Confirm
+                </button>
+                <button
+                  onClick={() => setRunConfirm(null)}
+                  className="rounded-lg border border-ink/15 px-3 py-1.5 text-xs font-semibold text-slate"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setRunConfirm(t.id)}
+                title="Create this task now for every store in its scope"
+                className="flex items-center gap-1.5 rounded-lg border border-brand/40 bg-brand-tint px-3 py-1.5 text-xs font-semibold text-brand-dark"
+              >
+                <Play size={13} weight="fill" /> Run now
+              </button>
+            )}
             <button
               onClick={() => setEditing(t)}
               className="flex items-center gap-1.5 rounded-lg border border-ink/15 px-3 py-1.5 text-xs font-semibold text-slate"
