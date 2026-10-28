@@ -1,11 +1,18 @@
 import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Thermometer, WarningOctagon } from '@phosphor-icons/react'
+import { ArrowLeft, Check, Thermometer, WarningOctagon, X } from '@phosphor-icons/react'
 import { useStoreUnits, useSubmitTempLog, useTasks } from '../../data/hooks'
 import { useToast } from '../../components/Toast'
+import WheelPicker from '../../components/WheelPicker'
 import GeoChip, { GeoNotice, useGeofence } from './GeoChip'
 import { useStaffStore } from './StaffShell'
 import { format } from 'date-fns'
+
+// readings are chosen on a wheel, so a value is always an integer in this range
+const TEMP_MIN = -25
+const TEMP_MAX = 30
+const clampTemp = (v: number) => Math.min(TEMP_MAX, Math.max(TEMP_MIN, Math.round(v)))
+const fmtTemp = (v: number) => `${v > 0 ? '+' : ''}${v}°C`
 
 export default function TempLog() {
   const { id } = useParams()
@@ -17,15 +24,32 @@ export default function TempLog() {
   const instance = (tasks ?? []).find((t) => t.id === id) ?? null
   const { result: geo, checking, retry } = useGeofence(store)
   const submit = useSubmitTempLog()
-  const [vals, setVals] = useState<Record<string, string>>({})
+  const [vals, setVals] = useState<Record<string, number>>({})
+  // wheel sheet: which unit is being set, and the value under the wheel's centre band
+  const [picking, setPicking] = useState<string | null>(null)
+  const [draft, setDraft] = useState<number>(0)
 
   const rows = (units ?? []).map((u) => {
-    const raw = vals[u.id] ?? ''
-    const num = raw === '' ? null : parseFloat(raw)
+    const num = vals[u.id] ?? null
     const bad = num != null && num > u.breach_above
     const warnState = num != null && !bad && num > u.safe_limit
-    return { unit: u, raw, num, bad, warn: warnState }
+    return { unit: u, num, bad, warn: warnState }
   })
+  const pickingRow = rows.find((r) => r.unit.id === picking) ?? null
+  const pickingIdx = rows.findIndex((r) => r.unit.id === picking)
+  const nextRow = pickingIdx >= 0 ? (rows[pickingIdx + 1] ?? null) : null
+
+  const openPicker = (unitId: string) => {
+    const row = rows.find((r) => r.unit.id === unitId)
+    if (!row) return
+    // start the wheel on the previous reading, else on the unit's safe limit
+    setDraft(clampTemp(row.num ?? Number(row.unit.safe_limit)))
+    setPicking(unitId)
+  }
+  const commitDraft = () => {
+    if (!picking) return
+    setVals((v) => ({ ...v, [picking]: draft }))
+  }
   const hasFail = rows.some((r) => r.bad)
   const allFilled = rows.length > 0 && rows.every((r) => r.num != null && !Number.isNaN(r.num))
   const blocked = geo?.verdict === 'off_site'
@@ -74,7 +98,11 @@ export default function TempLog() {
                       instance?.requires_approval === false
                         ? 'Temperature log completed'
                         : 'Temperature log submitted',
-                    msg: `All readings within safe limits. ${
+                    msg: `${
+                      rows.some((r) => r.warn)
+                        ? 'Logged — one or more readings sit above the safe limit but below the escalation threshold.'
+                        : 'All readings within safe limits.'
+                    } ${
                       instance?.requires_approval === false
                         ? 'Logged and archived — no review needed for this log.'
                         : 'Locked & sent to your Team Leader for verification.'
@@ -139,15 +167,14 @@ export default function TempLog() {
                     Safe limit ≤ {r.unit.safe_limit}°C · escalates &gt; {r.unit.breach_above}°C
                   </div>
                 </div>
-                <input
-                  value={r.raw}
-                  onChange={(e) => setVals((v) => ({ ...v, [r.unit.id]: e.target.value }))}
-                  inputMode="decimal"
-                  placeholder="—"
-                  className="w-[70px] rounded-[10px] border-[1.5px] p-2.5 text-center text-base font-bold outline-none"
+                <button
+                  onClick={() => openPicker(r.unit.id)}
+                  aria-label={`Set ${r.unit.name} reading`}
+                  className="min-w-[82px] rounded-[10px] border-[1.5px] bg-white p-2.5 text-center text-base font-bold outline-none"
                   style={{ borderColor: r.bad ? '#E5484D' : 'rgba(21,27,40,.15)', color }}
-                />
-                <span className="text-[13px] font-semibold text-muted">°C</span>
+                >
+                  {r.num != null ? fmtTemp(r.num) : '—'}
+                </button>
               </div>
             )
           })}
@@ -175,6 +202,74 @@ export default function TempLog() {
               : 'Enter every reading to submit'}
         </button>
       </div>
+
+      {pickingRow && (
+        <div
+          onClick={() => setPicking(null)}
+          className="fixed inset-0 z-[80] flex items-end justify-center bg-navy/50"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-[430px] animate-fade rounded-t-[20px] bg-white p-4 pb-6 shadow-[0_-20px_60px_rgba(0,0,0,.25)]"
+          >
+            <div className="mb-2 flex items-center gap-2.5">
+              <div className="flex-1">
+                <div className="text-[15px] font-bold">{pickingRow.unit.name}</div>
+                <div className="text-[11.5px] text-muted">
+                  Safe limit ≤ {pickingRow.unit.safe_limit}°C · escalates &gt; {pickingRow.unit.breach_above}°C
+                </div>
+              </div>
+              <button onClick={() => setPicking(null)} aria-label="Cancel" className="p-1 text-muted">
+                <X size={20} />
+              </button>
+            </div>
+            <WheelPicker
+              value={draft}
+              onChange={setDraft}
+              min={TEMP_MIN}
+              max={TEMP_MAX}
+              format={fmtTemp}
+              colorFor={(v) =>
+                v > pickingRow.unit.breach_above
+                  ? '#E5484D'
+                  : v > pickingRow.unit.safe_limit
+                    ? '#F59E0B'
+                    : '#16B364'
+              }
+            />
+            <div className="mt-1 text-center text-[11.5px] font-semibold" style={{ color: draft > pickingRow.unit.breach_above ? '#E5484D' : draft > pickingRow.unit.safe_limit ? '#F59E0B' : '#16B364' }}>
+              {draft > pickingRow.unit.breach_above
+                ? 'Above escalation threshold — will be escalated on submit'
+                : draft > pickingRow.unit.safe_limit
+                  ? 'Above safe limit'
+                  : 'Within safe limit'}
+            </div>
+            <div className="mt-3 flex gap-2.5">
+              <button
+                onClick={() => {
+                  commitDraft()
+                  setPicking(null)
+                }}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-ink/15 bg-white p-3 text-[13.5px] font-semibold text-slate"
+              >
+                <Check size={15} weight="bold" /> Done
+              </button>
+              {nextRow && (
+                <button
+                  onClick={() => {
+                    commitDraft()
+                    setDraft(clampTemp(nextRow.num ?? Number(nextRow.unit.safe_limit)))
+                    setPicking(nextRow.unit.id)
+                  }}
+                  className="flex flex-[1.4] items-center justify-center rounded-xl bg-brand p-3 text-[13.5px] font-semibold text-white"
+                >
+                  Next: {nextRow.unit.name}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
