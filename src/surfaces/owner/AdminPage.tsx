@@ -31,6 +31,7 @@ import {
   type TaskTemplate,
 } from '../../data/admin'
 import { useKioskAdmin, useKioskCodes } from '../../data/rota'
+import { geoErrorReason, geoReasonHelp } from '../../lib/geo'
 import { useToast } from '../../components/Toast'
 import TemplateEditor from './TemplateEditor'
 import type { AppRole, Profile, Store } from '../../lib/types'
@@ -484,9 +485,20 @@ function GeofencePanel() {
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
       {stores.map((s) => (
-        <GeofenceCard key={s.id} store={s} onSave={(patch) =>
-          update.mutate({ id: s.id, ...patch }, { onSuccess: () => toast(`${s.name} geofence updated`) })
-        } />
+        <GeofenceCard
+          key={s.id}
+          store={s}
+          saving={update.isPending}
+          onSave={(patch) =>
+            update.mutate(
+              { id: s.id, ...patch },
+              {
+                onSuccess: () => toast(`${s.name} geofence updated`, 'success'),
+                onError: (e) => toast(`Could not save ${s.name}: ${e.message}`, 'error'),
+              },
+            )
+          }
+        />
       ))}
     </div>
   )
@@ -494,24 +506,60 @@ function GeofencePanel() {
 
 function GeofenceCard({
   store,
+  saving,
   onSave,
 }: {
   store: Store
+  saving: boolean
   onSave: (patch: Partial<Store>) => void
 }) {
   const [lat, setLat] = useState(store.lat?.toString() ?? '')
   const [lng, setLng] = useState(store.lng?.toString() ?? '')
   const [radius, setRadius] = useState(store.geofence_radius_m)
+  const [locating, setLocating] = useState(false)
+  const [accuracy, setAccuracy] = useState<number | null>(null)
   const toast = useToast()
 
+  // follow the saved store when it changes (after our save, or another owner's edit)
+  useEffect(() => {
+    setLat(store.lat?.toString() ?? '')
+    setLng(store.lng?.toString() ?? '')
+    setRadius(store.geofence_radius_m)
+  }, [store.lat, store.lng, store.geofence_radius_m])
+
+  const latNum = lat.trim() === '' ? null : parseFloat(lat)
+  const lngNum = lng.trim() === '' ? null : parseFloat(lng)
+  const latBad = latNum != null && (Number.isNaN(latNum) || latNum < -90 || latNum > 90)
+  const lngBad = lngNum != null && (Number.isNaN(lngNum) || lngNum < -180 || lngNum > 180)
+  const halfSet = (latNum == null) !== (lngNum == null)
+  const dirty =
+    (latNum ?? null) !== (store.lat ?? null) ||
+    (lngNum ?? null) !== (store.lng ?? null) ||
+    radius !== store.geofence_radius_m
+  const canSave = dirty && !latBad && !lngBad && !halfSet && !saving
+
   const useMyLocation = () => {
+    if (!('geolocation' in navigator)) {
+      toast(geoReasonHelp('unsupported'), 'warn')
+      return
+    }
+    setLocating(true)
     navigator.geolocation.getCurrentPosition(
       (pos) => {
+        setLocating(false)
         setLat(pos.coords.latitude.toFixed(6))
         setLng(pos.coords.longitude.toFixed(6))
-        toast('Coordinates set from your current position', 'info')
+        setAccuracy(Math.round(pos.coords.accuracy))
+        toast(
+          `Coordinates set from your position (±${Math.round(pos.coords.accuracy)} m). Press Save to keep them.`,
+          'info',
+        )
       },
-      () => toast('Location permission denied', 'warn'),
+      (err) => {
+        setLocating(false)
+        toast(geoReasonHelp(geoErrorReason(err)), 'warn')
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
     )
   }
 
@@ -538,16 +586,45 @@ function GeofenceCard({
       </div>
       <div className="p-4">
         <div className="mb-2.5 font-display text-sm font-bold">{store.name}</div>
+        {store.lat == null || store.lng == null ? (
+          <div className="mb-2.5 rounded-[10px] border border-amber/25 bg-warn-soft p-2 text-[11px] font-medium text-amber">
+            No location set — staff cannot be verified on-site at this store yet.
+          </div>
+        ) : null}
         <div className="mb-2.5 grid grid-cols-2 gap-2">
           <div>
             <div className="mb-1 text-[10.5px] font-semibold text-slate">Latitude</div>
-            <input value={lat} onChange={(e) => setLat(e.target.value)} className={inputCls} />
+            <input
+              value={lat}
+              inputMode="decimal"
+              placeholder="e.g. 51.3721"
+              onChange={(e) => setLat(e.target.value)}
+              className={`${inputCls} ${latBad ? 'border-danger' : ''}`}
+            />
           </div>
           <div>
             <div className="mb-1 text-[10.5px] font-semibold text-slate">Longitude</div>
-            <input value={lng} onChange={(e) => setLng(e.target.value)} className={inputCls} />
+            <input
+              value={lng}
+              inputMode="decimal"
+              placeholder="e.g. -0.1005"
+              onChange={(e) => setLng(e.target.value)}
+              className={`${inputCls} ${lngBad ? 'border-danger' : ''}`}
+            />
           </div>
         </div>
+        {(latBad || lngBad || halfSet) && (
+          <div className="mb-2 text-[10.5px] font-medium text-danger">
+            {halfSet
+              ? 'Enter both latitude and longitude, or clear both.'
+              : 'Latitude must be between -90 and 90, longitude between -180 and 180.'}
+          </div>
+        )}
+        {accuracy != null && (
+          <div className="mb-2 text-[10.5px] text-muted">
+            Device fix accuracy ±{accuracy} m — if that is larger than the radius, widen the radius a little.
+          </div>
+        )}
         <div className="mb-1 flex justify-between text-[10.5px] font-semibold text-slate">
           <span>Radius</span>
           <span className="text-ink">{radius} m</span>
@@ -564,21 +641,24 @@ function GeofenceCard({
         <div className="flex gap-2">
           <button
             onClick={useMyLocation}
-            className="flex flex-1 items-center justify-center gap-1.5 rounded-[10px] border border-ink/15 p-2 text-xs font-semibold text-slate"
+            disabled={locating}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-[10px] border border-ink/15 p-2 text-xs font-semibold text-slate disabled:opacity-60"
           >
-            <Crosshair size={13} /> Use my location
+            <Crosshair size={13} className={locating ? 'animate-spin' : ''} />
+            {locating ? 'Locating…' : 'Use my location'}
           </button>
           <button
             onClick={() =>
               onSave({
-                lat: lat ? parseFloat(lat) : null,
-                lng: lng ? parseFloat(lng) : null,
+                lat: latNum,
+                lng: lngNum,
                 geofence_radius_m: radius,
               })
             }
-            className="flex flex-1 items-center justify-center gap-1.5 rounded-[10px] bg-brand p-2 text-xs font-semibold text-white"
+            disabled={!canSave}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-[10px] bg-brand p-2 text-xs font-semibold text-white disabled:opacity-50"
           >
-            <Check size={13} weight="bold" /> Save
+            <Check size={13} weight="bold" /> {saving ? 'Saving…' : dirty ? 'Save' : 'Saved'}
           </button>
         </div>
       </div>

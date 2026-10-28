@@ -1,8 +1,17 @@
 import type { Store } from './types'
 
+/** Why a location check came back 'unknown'. */
+export type GeoReason =
+  | 'unsupported' // browser has no geolocation API
+  | 'no_coords' // the store has no lat/lng configured yet
+  | 'denied' // user / OS blocked location for this site
+  | 'unavailable' // device could not get a fix (no GPS, airplane mode…)
+  | 'timeout' // no fix within the time limit
+
 export interface GeoResult {
   verdict: 'verified' | 'off_site' | 'unknown'
   distanceM: number | null
+  reason?: GeoReason
   lat?: number
   lng?: number
   accuracy?: number
@@ -19,10 +28,60 @@ function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): num
   return 2 * R * Math.asin(Math.sqrt(a))
 }
 
+export function geoErrorReason(err: GeolocationPositionError): GeoReason {
+  switch (err.code) {
+    case err.PERMISSION_DENIED:
+      return 'denied'
+    case err.TIMEOUT:
+      return 'timeout'
+    default:
+      return 'unavailable'
+  }
+}
+
+/** Short label for the status chip. */
+export function geoReasonShort(reason: GeoReason | undefined): string {
+  switch (reason) {
+    case 'denied':
+      return 'Location blocked'
+    case 'timeout':
+      return 'Location timed out'
+    case 'unsupported':
+      return 'No location support'
+    case 'no_coords':
+      return 'Store location not set'
+    default:
+      return 'No location'
+  }
+}
+
+/** Full sentence telling the user what to do about it. */
+export function geoReasonHelp(reason: GeoReason | undefined, storeName?: string): string {
+  const store = storeName ? ` for ${storeName}` : ''
+  switch (reason) {
+    case 'denied':
+      return 'Location is blocked for this app. Allow location in your browser or phone settings for this site, then retry.'
+    case 'timeout':
+      return 'Your phone did not find a location fix in time. Step away from walls or go near a window, then retry.'
+    case 'unavailable':
+      return 'Your device could not get a location. Check that location services are switched on, then retry.'
+    case 'unsupported':
+      return 'This browser does not support location. Open the app in Safari or Chrome.'
+    case 'no_coords':
+      return `The store location${store} has not been set yet. Ask the owner to set it in Admin → Geofence.`
+    default:
+      return 'Location is unavailable right now.'
+  }
+}
+
 export function checkGeofence(store: Store): Promise<GeoResult> {
   return new Promise((resolve) => {
-    if (!('geolocation' in navigator) || store.lat == null || store.lng == null) {
-      resolve({ verdict: 'unknown', distanceM: null })
+    if (!('geolocation' in navigator)) {
+      resolve({ verdict: 'unknown', distanceM: null, reason: 'unsupported' })
+      return
+    }
+    if (store.lat == null || store.lng == null) {
+      resolve({ verdict: 'unknown', distanceM: null, reason: 'no_coords' })
       return
     }
     navigator.geolocation.getCurrentPosition(
@@ -38,8 +97,8 @@ export function checkGeofence(store: Store): Promise<GeoResult> {
           accuracy: pos.coords.accuracy,
         })
       },
-      () => resolve({ verdict: 'unknown', distanceM: null }),
-      { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 },
+      (err) => resolve({ verdict: 'unknown', distanceM: null, reason: geoErrorReason(err) }),
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 },
     )
   })
 }

@@ -12,7 +12,7 @@ import { useAuth } from '../../auth/AuthProvider'
 import { useSubmitDelivery } from '../../data/hooks'
 import { compressImage } from '../../lib/image'
 import { useToast } from '../../components/Toast'
-import GeoChip, { useGeofence } from './GeoChip'
+import GeoChip, { GeoNotice, useGeofence } from './GeoChip'
 import { useStaffStore } from './StaffShell'
 
 const suppliers = ['Booker', 'Coca-Cola Enterprises', 'Nisa', 'Bestway']
@@ -23,7 +23,7 @@ export default function DeliveryWizard() {
   const toast = useToast()
   const { profile } = useAuth()
   const store = useStaffStore()
-  const { result: geo, checking } = useGeofence(store)
+  const { result: geo, checking, retry } = useGeofence(store)
   const submit = useSubmitDelivery()
 
   const [step, setStep] = useState(0)
@@ -144,6 +144,13 @@ export default function DeliveryWizard() {
       </div>
 
       <div className="flex-1 p-4">
+        <GeoNotice
+          result={geo}
+          checking={checking}
+          storeName={store?.name}
+          onRetry={retry}
+          tone={blocked ? 'danger' : 'warn'}
+        />
         {step === 0 && (
           <div className="flex flex-col gap-3.5">
             <div>

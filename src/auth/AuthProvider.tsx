@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import { disablePushOnSignOut } from '../lib/push'
@@ -13,6 +13,8 @@ interface AuthCtx {
   loadError: string | null
   profileMissing: boolean
   retry: () => void
+  /** Re-read the store list (after an owner edits a geofence, or on a realtime change). */
+  refreshStores: () => Promise<void>
   signOut: () => Promise<void>
 }
 
@@ -25,6 +27,7 @@ const Ctx = createContext<AuthCtx>({
   loadError: null,
   profileMissing: false,
   retry: () => {},
+  refreshStores: async () => {},
   signOut: async () => {},
 })
 
@@ -130,6 +133,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [session?.user.id, profile?.id])
 
+  // quiet re-read of stores — does NOT toggle `loading`, so the route tree stays mounted
+  const refreshStores = useCallback(async () => {
+    const { data, error } = await supabase.from('stores').select('*').order('name')
+    if (error) {
+      console.warn('store refresh failed —', error.message)
+      return
+    }
+    const list = (data as Store[]) ?? []
+    setStores(list)
+    setMyStoreIds((prev) => (profile?.role === 'owner' ? list.map((s) => s.id) : prev))
+  }, [profile?.role])
+
+  // keep store fences live across devices (owner edits in Admin → staff phones update)
+  useEffect(() => {
+    if (!session) return
+    const ch = supabase
+      .channel('stores-live')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'stores' }, () => {
+        void refreshStores()
+      })
+      .subscribe()
+    return () => {
+      supabase.removeChannel(ch)
+    }
+  }, [session?.user.id, refreshStores])
+
   const retry = () => setLoadNonce((n) => n + 1)
 
   const signOut = async () => {
@@ -156,6 +185,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loadError,
         profileMissing,
         retry,
+        refreshStores,
         signOut,
       }}
     >

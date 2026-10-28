@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Thermometer, WarningOctagon } from '@phosphor-icons/react'
 import { useStoreUnits, useSubmitTempLog, useTasks } from '../../data/hooks'
 import { useToast } from '../../components/Toast'
-import GeoChip, { useGeofence } from './GeoChip'
+import GeoChip, { GeoNotice, useGeofence } from './GeoChip'
 import { useStaffStore } from './StaffShell'
 import { format } from 'date-fns'
 
@@ -97,19 +97,13 @@ export default function TempLog() {
       </div>
 
       <div className="flex-1 p-4">
-        {!checking && geo?.verdict === 'unknown' && (
-          <div className="mb-3.5 flex items-center justify-between gap-2.5 rounded-[13px] border border-amber/25 bg-warn-soft p-3">
-            <div className="text-[11.5px] font-medium leading-snug text-amber">
-              Location unavailable — enable location so this log is verified on-site.
-            </div>
-            <button
-              onClick={retry}
-              className="flex-none rounded-[9px] border border-amber/40 bg-white px-3 py-1.5 text-[11.5px] font-semibold text-amber"
-            >
-              Retry location
-            </button>
-          </div>
-        )}
+        <GeoNotice
+          result={geo}
+          checking={checking}
+          storeName={store?.name}
+          onRetry={retry}
+          tone={blocked ? 'danger' : 'warn'}
+        />
         {hasFail && (
           <div className="mb-3.5 flex gap-2.5 rounded-[13px] border border-danger/25 bg-danger-soft p-3">
             <WarningOctagon size={20} weight="fill" color="#E5484D" className="flex-none" />

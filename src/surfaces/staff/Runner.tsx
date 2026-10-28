@@ -18,7 +18,7 @@ import {
   useToggleChecklistItem,
 } from '../../data/hooks'
 import { useToast } from '../../components/Toast'
-import GeoChip, { useGeofence } from './GeoChip'
+import GeoChip, { GeoNotice, useGeofence } from './GeoChip'
 import { useStaffStore } from './StaffShell'
 import QrScanner from '../../components/QrScanner'
 import type { ChecklistItem } from '../../lib/types'
@@ -378,22 +378,17 @@ export default function Runner() {
 
       <div className="flex-1 p-4">
         {blocked && (
-          <div className="mb-3 rounded-[13px] border border-danger/25 bg-danger-soft p-3 text-xs font-medium text-danger">
-            {noLocation ? (
-              <>
-                <div>Enable location to submit this task.</div>
-                <button
-                  onClick={retry}
-                  className="mt-2 rounded-[9px] border border-danger/40 bg-white px-3 py-1.5 font-semibold text-danger"
-                >
-                  Retry location
-                </button>
-              </>
-            ) : (
-              'This checklist requires on-premises completion. Move inside the store geofence to submit.'
-            )}
+          <div className="mb-1 text-[11px] font-semibold text-danger">
+            This checklist must be completed on the premises.
           </div>
         )}
+        <GeoNotice
+          result={geo}
+          checking={checking}
+          storeName={store?.name}
+          onRetry={retry}
+          tone={blocked ? 'danger' : 'warn'}
+        />
         {(items ?? []).map((it) => (
           <ItemRow key={it.id} item={it} onPhoto={onPhoto} onQr={setQrItem} />
         ))}

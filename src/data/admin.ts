@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase, ORG_ID } from '../lib/supabase'
+import { useAuth } from '../auth/AuthProvider'
 import type { AppRole, EvidenceReqs, Store, StoreUnit, TaskCategory, TaskPriority } from '../lib/types'
 
 export interface ChecklistDef {
@@ -130,12 +131,18 @@ export function useDeleteUnit() {
 // ---- stores / geofence ----
 export function useUpdateStore() {
   const qc = useQueryClient()
+  const { refreshStores } = useAuth()
   return useMutation({
     mutationFn: async (s: Partial<Store> & { id: string }) => {
       const { error } = await supabase.from('stores').update(s).eq('id', s.id)
       if (error) throw error
     },
-    onSuccess: () => qc.invalidateQueries(),
+    onSuccess: async () => {
+      // stores live in AuthProvider state, not in a query — re-read them so the
+      // Stores page, geofence cards and staff screens see the new fence at once
+      await refreshStores()
+      qc.invalidateQueries()
+    },
   })
 }
 
