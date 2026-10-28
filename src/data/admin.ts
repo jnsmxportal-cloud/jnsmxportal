@@ -27,7 +27,10 @@ export interface Recurrence {
 export interface TaskTemplate {
   id: string
   org_id: string
+  /** legacy single-store scope; kept in sync by a DB trigger from store_ids */
   store_id: string | null
+  /** stores this template applies to; null / empty = chain-wide */
+  store_ids: string[] | null
   title: string
   description: string | null
   category: TaskCategory

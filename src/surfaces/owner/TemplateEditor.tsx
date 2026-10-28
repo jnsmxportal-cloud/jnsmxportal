@@ -65,7 +65,17 @@ export default function TemplateEditor({
   const [description, setDescription] = useState(template?.description ?? '')
   const [category, setCategory] = useState<(typeof cats)[number]>(template?.category ?? 'daily')
   const [priority, setPriority] = useState<(typeof prios)[number]>(template?.priority ?? 'medium')
-  const [storeId, setStoreId] = useState<string>(template?.store_id ?? 'all')
+  // store scope: [] = chain-wide, otherwise the checked store ids
+  const [storeIds, setStoreIds] = useState<string[]>(
+    template?.store_ids?.length
+      ? template.store_ids
+      : template?.store_id
+        ? [template.store_id]
+        : [],
+  )
+  const chainWide = storeIds.length === 0
+  const toggleStore = (id: string) =>
+    setStoreIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
   const [evidence, setEvidence] = useState<Record<string, boolean>>(
     (template?.evidence as Record<string, boolean>) ?? {},
   )
@@ -107,7 +117,7 @@ export default function TemplateEditor({
         description: description || null,
         category,
         priority,
-        store_id: storeId === 'all' ? null : storeId,
+        store_ids: chainWide ? null : storeIds,
         evidence,
         geofence_policy: geoPolicy,
         recurrence: buildRecurrence(),
@@ -180,14 +190,47 @@ export default function TemplateEditor({
               <label className={label}>Title</label>
               <input value={title} onChange={(e) => setTitle(e.target.value)} className={inputCls} placeholder="e.g. Closing Checklist" />
             </div>
-            <div>
-              <label className={label}>Store scope</label>
-              <select value={storeId} onChange={(e) => setStoreId(e.target.value)} className={inputCls}>
-                <option value="all">Chain-wide</option>
-                {stores.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
+          </div>
+          <div>
+            <label className={label}>Store scope</label>
+            <div className="flex flex-wrap gap-2">
+              <label
+                className={`flex cursor-pointer items-center gap-2 rounded-[10px] border px-3 py-2 text-xs font-semibold ${
+                  chainWide ? 'border-brand bg-brand-tint text-brand-dark' : 'border-ink/15 bg-white text-slate'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={chainWide}
+                  onChange={() => setStoreIds([])}
+                  className="accent-[#FF5A2D]"
+                />
+                All stores (chain-wide)
+              </label>
+              {stores.map((s) => {
+                const on = storeIds.includes(s.id)
+                return (
+                  <label
+                    key={s.id}
+                    className={`flex cursor-pointer items-center gap-2 rounded-[10px] border px-3 py-2 text-xs font-semibold ${
+                      on ? 'border-brand bg-brand-tint text-brand-dark' : 'border-ink/15 bg-white text-slate'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      onChange={() => toggleStore(s.id)}
+                      className="accent-[#FF5A2D]"
+                    />
+                    {s.name}
+                  </label>
+                )
+              })}
+            </div>
+            <div className="mt-1.5 text-[11px] text-muted">
+              {chainWide
+                ? 'Scheduled at every store, including any added later.'
+                : `Scheduled at ${storeIds.length} of ${stores.length} stores. Untick all to make it chain-wide.`}
             </div>
           </div>
           <div>

@@ -52,6 +52,13 @@ const inputCls =
 const label = 'mb-1.5 block text-xs font-semibold text-slate'
 
 // ================= Templates =================
+function templateScopeLabel(t: TaskTemplate, stores: Store[]): string {
+  const ids = t.store_ids?.length ? t.store_ids : t.store_id ? [t.store_id] : []
+  if (ids.length === 0 || ids.length >= stores.length) return 'Chain-wide'
+  const names = ids.map((id) => stores.find((s) => s.id === id)?.name).filter(Boolean)
+  return names.length <= 2 ? names.join(' + ') : `${names.length} stores`
+}
+
 function TemplatesPanel() {
   const { data: templates } = useTemplates()
   const { stores } = useAuth()
@@ -89,7 +96,7 @@ function TemplatesPanel() {
               </div>
               <div className="mt-0.5 text-xs text-muted">
                 {recurrenceSummary(t.recurrence)} ·{' '}
-                {t.store_id ? stores.find((s) => s.id === t.store_id)?.name : 'Chain-wide'} ·{' '}
+                {templateScopeLabel(t, stores)} ·{' '}
                 {t.checklist.length} items
               </div>
             </div>
