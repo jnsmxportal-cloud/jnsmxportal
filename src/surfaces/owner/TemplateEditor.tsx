@@ -81,6 +81,8 @@ export default function TemplateEditor({
   )
   const [geoPolicy, setGeoPolicy] = useState(template?.geofence_policy ?? 'none')
   const [requiresApproval, setRequiresApproval] = useState(template?.requires_approval ?? true)
+  // temperature logs open the readings screen (store chillers/freezers) instead of the checklist runner
+  const [isTempLog, setIsTempLog] = useState(template?.is_temperature_log ?? false)
   const [freq, setFreq] = useState<Recurrence['freq'] | 'none'>(template?.recurrence?.freq ?? 'none')
   const [times, setTimes] = useState((template?.recurrence?.times ?? []).join(', '))
   const [exceptDays, setExceptDays] = useState<number[]>(template?.recurrence?.except_days ?? [])
@@ -121,9 +123,10 @@ export default function TemplateEditor({
         evidence,
         geofence_policy: geoPolicy,
         recurrence: buildRecurrence(),
-        checklist: items.filter((i) => i.label.trim()),
+        // a temp log has no checklist: its rows come from the store's unit registry
+        checklist: isTempLog ? [] : items.filter((i) => i.label.trim()),
         requires_approval: requiresApproval,
-        is_temperature_log: template?.is_temperature_log ?? false,
+        is_temperature_log: isTempLog,
       },
       {
         onSuccess: () => {
@@ -348,9 +351,28 @@ export default function TemplateEditor({
                 />
                 Requires review &amp; approval
               </label>
+              <label className="mt-2 flex items-center gap-2 text-xs font-semibold text-slate">
+                <input
+                  type="checkbox"
+                  checked={isTempLog}
+                  onChange={(e) => setIsTempLog(e.target.checked)}
+                  className="h-4 w-4 accent-[#FF5A2D]"
+                />
+                Temperature log
+              </label>
             </div>
           </div>
 
+          {isTempLog ? (
+            <div className="rounded-xl border border-dashed border-danger/40 bg-danger-soft/40 p-4 text-[11.5px] text-slate">
+              <div className="mb-0.5 flex items-center gap-1.5 font-semibold">
+                <Thermometer size={13} /> Temperature log
+              </div>
+              Staff record a reading for every chiller and freezer in the store's unit registry (Admin → Units)
+              instead of ticking checklist items. Breaches above a unit's threshold escalate automatically.
+              {items.length > 0 && ' Existing checklist items will be dropped when you save.'}
+            </div>
+          ) : (
           <div>
             <div className="mb-1.5 flex items-center justify-between">
               <label className="text-xs font-semibold text-slate">Checklist items</label>
@@ -396,6 +418,7 @@ export default function TemplateEditor({
               )}
             </div>
           </div>
+          )}
         </div>
 
         <div className="flex gap-2.5 border-t border-line px-6 py-4">
