@@ -110,7 +110,14 @@ export function EvidenceGallery({ instanceId }: { instanceId: string }) {
         No evidence attached
       </div>
     )
-  const photos = rows.filter((e) => e.type === 'photo' && e.storage_path)
+  const allPhotos = rows.filter((e) => e.type === 'photo' && e.storage_path)
+  const unitKey = (e: EvidenceRow) => {
+    const m = (e.metadata ?? {}) as { unit_id?: string; unit?: string }
+    return m.unit_id ?? m.unit ?? null
+  }
+  // temperature-log display photos sit next to their reading; everything else lists as before
+  const unitPhotos = allPhotos.filter((e) => unitKey(e))
+  const photos = allPhotos.filter((e) => !unitKey(e))
   const signatures = rows.filter((e) => e.type === 'signature' && e.storage_path)
   const temps = rows.filter((e) => e.type === 'metadata')
   const qrs = rows.filter((e) => e.type === 'qr')
@@ -123,16 +130,27 @@ export function EvidenceGallery({ instanceId }: { instanceId: string }) {
         <EvidencePhoto key={e.id} ev={e} />
       ))}
       {temps.map((e) => {
-        const m = (e.metadata ?? {}) as { unit?: string; value?: number; breach?: boolean }
-        return (
+        const m = (e.metadata ?? {}) as { unit?: string; unit_id?: string; value?: number; breach?: boolean }
+        const photo = unitPhotos.find((p) => unitKey(p) === (m.unit_id ?? m.unit))
+        const chip = (
           <span
-            key={e.id}
             className={`flex items-center gap-1.5 rounded-[9px] px-2.5 py-[7px] text-[11.5px] font-semibold ${
               m.breach ? 'bg-danger-soft text-danger' : 'bg-canvas text-slate'
             }`}
           >
             <Thermometer size={13} weight="fill" color={m.breach ? '#E5484D' : '#16B364'} />
             {m.unit ?? 'Unit'} · {m.value ?? '—'}°C{m.breach ? ' · BREACH' : ''}
+          </span>
+        )
+        if (!photo) return <span key={e.id}>{chip}</span>
+        return (
+          <span
+            key={e.id}
+            title="Reading with the photo of this unit's display"
+            className="flex items-center gap-1.5 rounded-[12px] border border-line bg-white p-1"
+          >
+            <EvidencePhoto ev={photo} />
+            {chip}
           </span>
         )
       })}

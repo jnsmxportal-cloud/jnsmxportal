@@ -70,6 +70,10 @@ export interface TempLogArgs {
   storeId: string
   readings: { unit: StoreUnit; value: number }[]
   geofenceVerdict: string
+  /** camera photo of each unit's display, keyed by unit id (Blobs survive the Dexie queue) */
+  photos?: Record<string, Blob>
+  /** device fix at capture time, stamped onto the photo evidence rows */
+  geo?: { lat?: number; lng?: number; accuracy?: number }
 }
 
 export async function submitTempLogCore(uid: string, args: TempLogArgs, deviceTs?: string) {
@@ -117,9 +121,11 @@ export async function submitTempLogCore(uid: string, args: TempLogArgs, deviceTs
       type: 'metadata',
       metadata: {
         unit: r.unit.name,
+        unit_id: r.unit.id,
         unit_type: r.unit.type,
         value: r.value,
         breach: r.value > r.unit.breach_above,
+        photo: !!args.photos?.[r.unit.id],
       },
       uploader: uid,
       device_ts: ts,
@@ -127,6 +133,32 @@ export async function submitTempLogCore(uid: string, args: TempLogArgs, deviceTs
     })),
   )
   if (evidenceError) throw evidenceError
+  // one photo of each unit's display, linked to the reading by unit id
+  let photoCount = 0
+  for (const r of args.readings) {
+    const blob = args.photos?.[r.unit.id]
+    if (!blob) continue
+    const path = `${ORG_ID}/${instanceId}/unit-${r.unit.id}-${Date.now()}.jpg`
+    const { error: uploadError } = await supabase.storage
+      .from('evidence')
+      .upload(path, blob, { contentType: 'image/jpeg' })
+    if (uploadError) throw uploadError
+    const { error: photoError } = await supabase.from('evidence').insert({
+      org_id: ORG_ID,
+      instance_id: instanceId,
+      type: 'photo',
+      storage_path: path,
+      metadata: { unit: r.unit.name, unit_id: r.unit.id, value: r.value },
+      uploader: uid,
+      device_ts: ts,
+      gps_lat: args.geo?.lat,
+      gps_lng: args.geo?.lng,
+      gps_accuracy: args.geo?.accuracy,
+      geofence_verdict: args.geofenceVerdict,
+    })
+    if (photoError) throw photoError
+    photoCount++
+  }
   const breaches = args.readings.filter((r) => r.value > r.unit.breach_above)
   if (breaches.length) {
     const { error: escError } = await supabase.from('escalations').insert(
@@ -183,6 +215,7 @@ export async function submitTempLogCore(uid: string, args: TempLogArgs, deviceTs
   }
   await audit(uid, 'templog.submitted', 'task_instance', instanceId!, {
     breaches: breaches.length,
+    photos: photoCount,
   })
   return { breaches: breaches.length, queued: false }
 }

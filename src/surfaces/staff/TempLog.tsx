@@ -1,11 +1,20 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Check, Thermometer, WarningOctagon, X } from '@phosphor-icons/react'
+import {
+  ArrowLeft,
+  ArrowsClockwise,
+  Camera,
+  Check,
+  Thermometer,
+  WarningOctagon,
+  X,
+} from '@phosphor-icons/react'
 import { useStoreUnits, useSubmitTempLog, useTasks } from '../../data/hooks'
 import { useToast } from '../../components/Toast'
 import WheelPicker from '../../components/WheelPicker'
 import GeoChip, { GeoNotice, useGeofence } from './GeoChip'
 import { useStaffStore } from './StaffShell'
+import { compressImage } from '../../lib/image'
 import { format } from 'date-fns'
 
 // readings are chosen on a wheel, so a value is always an integer in this range
@@ -13,6 +22,11 @@ const TEMP_MIN = -25
 const TEMP_MAX = 30
 const clampTemp = (v: number) => Math.min(TEMP_MAX, Math.max(TEMP_MIN, Math.round(v)))
 const fmtTemp = (v: number) => `${v > 0 ? '+' : ''}${v}°C`
+
+interface UnitPhoto {
+  blob: Blob
+  url: string
+}
 
 export default function TempLog() {
   const { id } = useParams()
@@ -28,12 +42,20 @@ export default function TempLog() {
   // wheel sheet: which unit is being set, and the value under the wheel's centre band
   const [picking, setPicking] = useState<string | null>(null)
   const [draft, setDraft] = useState<number>(0)
+  // one camera photo of each unit's display, keyed by unit id (camera-only: no gallery picks)
+  const [photos, setPhotos] = useState<Record<string, UnitPhoto>>({})
+  const [processing, setProcessing] = useState<string | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const photoUnit = useRef<string | null>(null)
+
+  // a template/task with Photo evidence requires a photo per unit before submit
+  const photosRequired = !!instance?.evidence?.photo
 
   const rows = (units ?? []).map((u) => {
     const num = vals[u.id] ?? null
     const bad = num != null && num > u.breach_above
     const warnState = num != null && !bad && num > u.safe_limit
-    return { unit: u, num, bad, warn: warnState }
+    return { unit: u, num, bad, warn: warnState, photo: photos[u.id] ?? null }
   })
   const pickingRow = rows.find((r) => r.unit.id === picking) ?? null
   const pickingIdx = rows.findIndex((r) => r.unit.id === picking)
@@ -50,21 +72,52 @@ export default function TempLog() {
     if (!picking) return
     setVals((v) => ({ ...v, [picking]: draft }))
   }
+
+  const takePhoto = (unitId: string) => {
+    photoUnit.current = unitId
+    fileRef.current?.click()
+  }
+  const onFile = async (f: File | undefined) => {
+    const unitId = photoUnit.current
+    if (fileRef.current) fileRef.current.value = ''
+    if (!f || !unitId) return
+    setProcessing(unitId)
+    try {
+      const blob = await compressImage(f)
+      setPhotos((p) => {
+        const prev = p[unitId]
+        if (prev) URL.revokeObjectURL(prev.url)
+        return { ...p, [unitId]: { blob, url: URL.createObjectURL(blob) } }
+      })
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not process the photo', 'error')
+    } finally {
+      setProcessing(null)
+    }
+  }
+
   const hasFail = rows.some((r) => r.bad)
-  const allFilled = rows.length > 0 && rows.every((r) => r.num != null && !Number.isNaN(r.num))
+  const readingsFilled = rows.length > 0 && rows.every((r) => r.num != null && !Number.isNaN(r.num))
+  const photosFilled = !photosRequired || rows.every((r) => r.photo)
+  const allFilled = readingsFilled && photosFilled
   const blocked = geo?.verdict === 'off_site'
+  const photoCount = rows.filter((r) => r.photo).length
 
   const doSubmit = () => {
     if (!store) {
       toast('No store assigned to your account', 'error')
       return
     }
+    const photoBlobs: Record<string, Blob> = {}
+    for (const r of rows) if (r.photo) photoBlobs[r.unit.id] = r.photo.blob
     submit.mutate(
       {
         instance,
         storeId: store.id,
         readings: rows.map((r) => ({ unit: r.unit, value: r.num! })),
         geofenceVerdict: geo?.verdict ?? 'unknown',
+        photos: photoBlobs,
+        geo: { lat: geo?.lat, lng: geo?.lng, accuracy: geo?.accuracy },
       },
       {
         onSuccess: ({ breaches, queued }) => {
@@ -74,7 +127,7 @@ export default function TempLog() {
                 icon: 'seal',
                 color: '#F59E0B',
                 title: 'Saved offline ⟳',
-                msg: 'No connection right now — your readings are queued on this device and will sync automatically when you’re back online.',
+                msg: `No connection right now — your readings${photoCount ? ' and photos' : ''} are queued on this device and will sync automatically when you’re back online.`,
               },
             })
             return
@@ -102,7 +155,7 @@ export default function TempLog() {
                       rows.some((r) => r.warn)
                         ? 'Logged — one or more readings sit above the safe limit but below the escalation threshold.'
                         : 'All readings within safe limits.'
-                    } ${
+                    }${photoCount ? ` ${photoCount} display photo${photoCount === 1 ? '' : 's'} attached.` : ''} ${
                       instance?.requires_approval === false
                         ? 'Logged and archived — no review needed for this log.'
                         : 'Locked & sent to your Team Leader for verification.'
@@ -117,6 +170,15 @@ export default function TempLog() {
 
   return (
     <div className="flex min-h-full flex-col bg-canvas">
+      {/* camera-only capture: no gallery picker, so the photo is taken here and now */}
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(e) => onFile(e.target.files?.[0])}
+      />
       <div className="border-b border-line bg-white px-4 pb-3 pt-2">
         <div className="flex items-center gap-2.5">
           <button onClick={() => navigate('/staff')} className="p-1">
@@ -145,14 +207,25 @@ export default function TempLog() {
             </div>
           </div>
         )}
+        {photosRequired && (
+          <div className="mb-3.5 flex items-center gap-2.5 rounded-[13px] border border-line bg-white p-3 text-[11.5px] text-slate">
+            <Camera size={18} weight="fill" className="flex-none text-brand" />
+            <div>
+              <b>Photo of every display required.</b> Take it with the camera as you read each unit —
+              photos are stamped with the time and your location.
+            </div>
+          </div>
+        )}
         <div className="flex flex-col gap-3">
           {rows.map((r) => {
             const color = r.bad ? '#E5484D' : r.warn ? '#F59E0B' : r.num != null ? '#16B364' : '#8B93A4'
             const bg = r.bad ? '#FCEBEC' : r.warn ? '#FEF3E2' : '#E7F7EF'
+            const missingPhoto = photosRequired && !r.photo
+            const busy = processing === r.unit.id
             return (
               <div
                 key={r.unit.id}
-                className="flex items-center gap-3 rounded-[14px] bg-white p-[15px]"
+                className="flex items-center gap-3 rounded-[14px] bg-white p-[13px]"
                 style={{ border: `1px solid ${r.bad ? 'rgba(229,72,77,.4)' : 'rgba(21,27,40,.08)'}` }}
               >
                 <div
@@ -161,16 +234,43 @@ export default function TempLog() {
                 >
                   <Thermometer size={22} weight="fill" color={color} />
                 </div>
-                <div className="flex-1">
-                  <div className="text-sm font-semibold">{r.unit.name}</div>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-semibold">{r.unit.name}</div>
                   <div className="text-[11.5px] text-muted">
-                    Safe limit ≤ {r.unit.safe_limit}°C · escalates &gt; {r.unit.breach_above}°C
+                    Safe ≤ {r.unit.safe_limit}°C · escalates &gt; {r.unit.breach_above}°C
                   </div>
                 </div>
                 <button
+                  onClick={() => takePhoto(r.unit.id)}
+                  disabled={busy}
+                  aria-label={r.photo ? `Retake photo of ${r.unit.name}` : `Photograph ${r.unit.name}`}
+                  title={r.photo ? 'Retake photo' : photosRequired ? 'Photo required' : 'Add a photo (optional)'}
+                  className="relative h-11 w-11 flex-none overflow-hidden rounded-[10px] border-[1.5px] bg-white"
+                  style={{
+                    borderColor: r.photo ? '#16B364' : missingPhoto ? '#E5484D' : 'rgba(21,27,40,.15)',
+                  }}
+                >
+                  {r.photo ? (
+                    <>
+                      <img src={r.photo.url} alt="" className="h-full w-full object-cover" />
+                      <span className="absolute inset-x-0 bottom-0 flex items-center justify-center bg-ink/60 py-px text-white">
+                        <ArrowsClockwise size={10} weight="bold" />
+                      </span>
+                    </>
+                  ) : (
+                    <span className="flex h-full w-full items-center justify-center">
+                      {busy ? (
+                        <ArrowsClockwise size={18} className="animate-spin text-muted" />
+                      ) : (
+                        <Camera size={18} color={missingPhoto ? '#E5484D' : '#8B93A4'} />
+                      )}
+                    </span>
+                  )}
+                </button>
+                <button
                   onClick={() => openPicker(r.unit.id)}
                   aria-label={`Set ${r.unit.name} reading`}
-                  className="min-w-[82px] rounded-[10px] border-[1.5px] bg-white p-2.5 text-center text-base font-bold outline-none"
+                  className="min-w-[78px] rounded-[10px] border-[1.5px] bg-white p-2.5 text-center text-base font-bold outline-none"
                   style={{ borderColor: r.bad ? '#E5484D' : 'rgba(21,27,40,.15)', color }}
                 >
                   {r.num != null ? fmtTemp(r.num) : '—'}
@@ -199,7 +299,9 @@ export default function TempLog() {
             ? 'Blocked — outside geofence'
             : allFilled
               ? 'Submit temperature log'
-              : 'Enter every reading to submit'}
+              : readingsFilled
+                ? 'Photograph every unit to submit'
+                : 'Enter every reading to submit'}
         </button>
       </div>
 

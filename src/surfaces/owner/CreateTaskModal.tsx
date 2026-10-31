@@ -434,6 +434,7 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
               </div>
               Staff record a reading for every chiller and freezer in the store's unit registry (Admin → Units)
               instead of ticking checklist items.
+              {evidence.photo && ' Photo evidence is on, so staff must photograph every unit’s display before they can submit.'}
               {items.length > 0 && ' The checklist items below are not used.'}
             </div>
           ) : (
