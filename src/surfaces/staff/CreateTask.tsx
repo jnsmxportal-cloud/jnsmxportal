@@ -7,6 +7,7 @@ import { categoryOptions, useCategories } from '../../data/categories'
 import { useToast } from '../../components/Toast'
 import { useStaffStore } from './StaffShell'
 import type { TaskCategory } from '../../lib/types'
+import { DateTimeField } from '../../components/TimeField'
 
 const prios = ['low', 'medium', 'high'] as const
 
@@ -93,7 +94,7 @@ export default function CreateTask() {
         </div>
         <div>
           <label className={label}>Due date</label>
-          <input type="datetime-local" value={due} onChange={(e) => setDue(e.target.value)} className={inputCls} />
+          <DateTimeField value={due} onChange={setDue} className={inputCls} />
         </div>
         <div>
           <label className={label}>Priority</label>

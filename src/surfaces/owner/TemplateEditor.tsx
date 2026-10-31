@@ -23,6 +23,7 @@ import {
   type Recurrence,
   type TaskTemplate,
 } from '../../data/admin'
+import TimeField, { HoursField } from '../../components/TimeField'
 
 const prios = ['low', 'medium', 'high', 'critical'] as const
 const freqs: { id: Recurrence['freq'] | 'none'; label: string }[] = [
@@ -35,6 +36,24 @@ const freqs: { id: Recurrence['freq'] | 'none'; label: string }[] = [
 ]
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
+/**
+ * Hours-after-deadline for a template: the stored value, or derived from a legacy absolute
+ * escalate_at (wrapping past midnight), or null when the template never escalates.
+ */
+function legacyEscalateHours(r: Recurrence | null | undefined): number | null {
+  if (!r) return null
+  if (typeof r.escalate_after_hours === 'number') return r.escalate_after_hours
+  if (!r.escalate_at) return null
+  const base = r.deadline ?? r.times?.[0]
+  if (!base) return null
+  const mins = (s: string) => {
+    const [h, m] = s.split(':').map(Number)
+    return h * 60 + m
+  }
+  const diff = mins(r.escalate_at) - mins(base)
+  return Math.max(0, Math.round((diff < 0 ? diff + 1440 : diff) / 60))
+}
+
 /** today's local date as YYYY-MM-DD (default biweekly anchor) */
 function todayIso(): string {
   const d = new Date()
@@ -42,7 +61,7 @@ function todayIso(): string {
 }
 const evidenceDefs = [
   { k: 'photo', label: 'Photo', Icon: Camera },
-  { k: 'temp', label: 'Temperature', Icon: Thermometer },
+  { k: 'temp', label: 'Temperature log', Icon: Thermometer },
   { k: 'qr', label: 'QR scan', Icon: QrCode },
   { k: 'signature', label: 'Signature', Icon: Signature },
   { k: 'note', label: 'Note', Icon: Note },
@@ -92,13 +111,16 @@ export default function TemplateEditor({
   // temperature logs open the readings screen (store chillers/freezers) instead of the checklist runner
   const [isTempLog, setIsTempLog] = useState(template?.is_temperature_log ?? false)
   const [freq, setFreq] = useState<Recurrence['freq'] | 'none'>(template?.recurrence?.freq ?? 'none')
-  const [times, setTimes] = useState((template?.recurrence?.times ?? []).join(', '))
+  const [times, setTimes] = useState<string[]>(template?.recurrence?.times ?? [])
   const [exceptDays, setExceptDays] = useState<number[]>(template?.recurrence?.except_days ?? [])
   const [byweekday, setByweekday] = useState<number[]>(template?.recurrence?.byweekday ?? [])
   // biweekly: the week containing this date is the first run week
   const [anchor, setAnchor] = useState(template?.recurrence?.anchor ?? todayIso())
   const [deadline, setDeadline] = useState(template?.recurrence?.deadline ?? '')
-  const [escalateAt, setEscalateAt] = useState(template?.recurrence?.escalate_at ?? '')
+  // hours after the deadline before the task is marked missed + escalated; null = never
+  const [escalateAfter, setEscalateAfter] = useState<number | null>(
+    legacyEscalateHours(template?.recurrence),
+  )
   const [deadlineRel, setDeadlineRel] = useState(template?.recurrence?.deadline_rel ?? 'shift_end')
   const [items, setItems] = useState<ChecklistDef[]>(template?.checklist ?? [])
 
@@ -106,13 +128,9 @@ export default function TemplateEditor({
     if (freq === 'none') return null
     const r: Recurrence = { freq }
     if (freq === 'daily' || freq === 'weekly' || freq === 'biweekly') {
-      const t = times
-        .split(',')
-        .map((s) => s.trim())
-        .filter((s) => /^\d{1,2}:\d{2}$/.test(s))
-      if (t.length) r.times = t
+      if (times.length) r.times = [...times].sort()
       if (deadline) r.deadline = deadline
-      if (escalateAt) r.escalate_at = escalateAt
+      if (escalateAfter !== null) r.escalate_after_hours = escalateAfter
       if (freq === 'daily' && exceptDays.length) r.except_days = exceptDays
       if (freq === 'weekly' || freq === 'biweekly') r.byweekday = byweekday
       if (freq === 'biweekly') r.anchor = anchor || todayIso()
@@ -131,7 +149,7 @@ export default function TemplateEditor({
         category,
         priority,
         store_ids: chainWide ? null : storeIds,
-        evidence,
+        evidence: { ...evidence, temp: isTempLog },
         geofence_policy: geoPolicy,
         recurrence: buildRecurrence(),
         // a temp log has no checklist: its rows come from the store's unit registry
@@ -311,18 +329,54 @@ export default function TemplateEditor({
                     {weekdayToggles(exceptDays, setExceptDays)}
                   </div>
                 )}
-                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
-                  <div>
-                    <div className="mb-1 text-[11px] font-semibold text-slate">Times (HH:MM)</div>
-                    <input value={times} onChange={(e) => setTimes(e.target.value)} placeholder="07:00, 14:00" className={inputCls} />
+                <div>
+                  <div className="mb-1 text-[11px] font-semibold text-slate">Times</div>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {times.map((t) => (
+                      <span
+                        key={t}
+                        className="flex items-center gap-1 rounded-[10px] border border-brand bg-brand-tint px-2.5 py-1.5 text-xs font-semibold text-brand-dark"
+                      >
+                        {t}
+                        <button
+                          onClick={() => setTimes((a) => a.filter((x) => x !== t))}
+                          aria-label={`Remove ${t}`}
+                          className="rounded p-0.5 hover:text-danger"
+                        >
+                          <X size={11} weight="bold" />
+                        </button>
+                      </span>
+                    ))}
+                    <TimeField
+                      value=""
+                      onChange={(t) => t && setTimes((a) => (a.includes(t) ? a : [...a, t].sort()))}
+                      placeholder="+ Add time"
+                      label="Add a time"
+                      className="rounded-[10px] border border-dashed border-ink/25 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate"
+                    />
                   </div>
+                  {times.length === 0 && (
+                    <div className="mt-1 text-[11px] text-muted">A task is created at each time on every scheduled day.</div>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                   <div>
                     <div className="mb-1 text-[11px] font-semibold text-slate">Deadline</div>
-                    <input type="time" value={deadline} onChange={(e) => setDeadline(e.target.value)} className={inputCls} />
+                    <TimeField
+                      value={deadline}
+                      onChange={setDeadline}
+                      clearable
+                      placeholder="Same as the trigger time"
+                      label="Deadline"
+                      className={inputCls}
+                    />
                   </div>
                   <div>
-                    <div className="mb-1 text-[11px] font-semibold text-slate">Escalate at</div>
-                    <input type="time" value={escalateAt} onChange={(e) => setEscalateAt(e.target.value)} className={inputCls} />
+                    <div className="mb-1 text-[11px] font-semibold text-slate">Escalate after</div>
+                    <HoursField value={escalateAfter} onChange={setEscalateAfter} className={inputCls} />
+                    <div className="mt-1 text-[11px] text-muted">
+                      Hours past the deadline before the task is marked missed and escalated to the Owner.
+                    </div>
                   </div>
                 </div>
               </div>
@@ -347,15 +401,20 @@ export default function TemplateEditor({
             <div>
               <label className={label}>Required evidence</label>
               <div className="flex flex-wrap gap-1.5">
-                {evidenceDefs.map((e) => (
-                  <button
-                    key={e.k}
-                    onClick={() => setEvidence((ev) => ({ ...ev, [e.k]: !ev[e.k] }))}
-                    className={`${chip(!!evidence[e.k])} flex items-center gap-1`}
-                  >
-                    <e.Icon size={13} /> {e.label}
-                  </button>
-                ))}
+                {evidenceDefs.map((e) => {
+                  // "Temperature log" switches the whole task to the readings screen (is_temperature_log);
+                  // the other chips are plain evidence requirements
+                  const on = e.k === 'temp' ? isTempLog : !!evidence[e.k]
+                  const toggle = () =>
+                    e.k === 'temp'
+                      ? setIsTempLog((v) => !v)
+                      : setEvidence((ev) => ({ ...ev, [e.k]: !ev[e.k] }))
+                  return (
+                    <button key={e.k} onClick={toggle} className={`${chip(on)} flex items-center gap-1`}>
+                      <e.Icon size={13} /> {e.label}
+                    </button>
+                  )
+                })}
               </div>
             </div>
             <div>
@@ -375,15 +434,6 @@ export default function TemplateEditor({
                   className="h-4 w-4 accent-[#FF5A2D]"
                 />
                 Requires review &amp; approval
-              </label>
-              <label className="mt-2 flex items-center gap-2 text-xs font-semibold text-slate">
-                <input
-                  type="checkbox"
-                  checked={isTempLog}
-                  onChange={(e) => setIsTempLog(e.target.checked)}
-                  className="h-4 w-4 accent-[#FF5A2D]"
-                />
-                Temperature log
               </label>
             </div>
           </div>

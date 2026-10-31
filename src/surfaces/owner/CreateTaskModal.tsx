@@ -18,12 +18,13 @@ import { recurrenceSummary, useTemplates, type TaskTemplate } from '../../data/a
 import { useToast } from '../../components/Toast'
 import { categoryMeta, categoryOptions, useCategories } from '../../data/categories'
 import type { TaskCategory, TaskPriority } from '../../lib/types'
+import { DateTimeField } from '../../components/TimeField'
 
 const CUSTOM = 'custom'
 const prios: TaskPriority[] = ['low', 'medium', 'high', 'critical']
 const evidenceDefs = [
   { k: 'photo', label: 'Photo', Icon: Camera },
-  { k: 'temp', label: 'Temperature', Icon: Thermometer },
+  { k: 'temp', label: 'Temperature log', Icon: Thermometer },
   { k: 'qr', label: 'QR scan', Icon: QrCode },
   { k: 'signature', label: 'Signature', Icon: Signature },
   { k: 'note', label: 'Note', Icon: Note },
@@ -60,6 +61,8 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
   const [due, setDue] = useState<string>('')
   const [prio, setPrio] = useState<TaskPriority>('medium')
   const [evidence, setEvidence] = useState<Record<string, boolean>>({})
+  // readings screen instead of a checklist; follows the template when one is picked
+  const [isTempLog, setIsTempLog] = useState(false)
   const [needsReview, setNeedsReview] = useState(true)
 
   const template =
@@ -78,6 +81,7 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
   const pickTemplate = (t: TaskTemplate | null) => {
     if (!t) {
       setTemplateId(CUSTOM)
+      setIsTempLog(false)
       return
     }
     setTemplateId(t.id)
@@ -86,6 +90,7 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
     setCategory(t.category)
     setPrio(t.priority)
     setEvidence({ ...(t.evidence as Record<string, boolean>) })
+    setIsTempLog(t.is_temperature_log)
     setNeedsReview(t.requires_approval ?? true)
   }
 
@@ -119,11 +124,11 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
         dueAt: due ? new Date(due).toISOString() : null,
         priority: prio,
         category,
-        evidence,
+        evidence: { ...evidence, temp: isTempLog },
         templateId: template?.id ?? null,
         description: description.trim() || null,
         geofencePolicy: template?.geofence_policy ?? 'none',
-        isTemperatureLog: template?.is_temperature_log ?? false,
+        isTemperatureLog: isTempLog,
         requiresApproval: needsReview,
       },
       {
@@ -290,12 +295,7 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
             </div>
             <div>
               <label className={label}>Due date &amp; time</label>
-              <input
-                type="datetime-local"
-                value={due}
-                onChange={(e) => setDue(e.target.value)}
-                className={inputCls}
-              />
+              <DateTimeField value={due} onChange={setDue} className={inputCls} />
             </div>
           </div>
 
@@ -330,15 +330,25 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
           <div>
             <label className={label}>Required evidence</label>
             <div className="flex flex-wrap gap-2">
-              {evidenceDefs.map((e) => (
-                <button
-                  key={e.k}
-                  onClick={() => setEvidence((ev) => ({ ...ev, [e.k]: !ev[e.k] }))}
-                  className={`flex items-center gap-1.5 ${chip(!!evidence[e.k])}`}
-                >
-                  <e.Icon size={15} /> {e.label}
-                </button>
-              ))}
+              {evidenceDefs.map((e) => {
+                const isTemp = e.k === 'temp'
+                const on = isTemp ? isTempLog : !!evidence[e.k]
+                // a template decides whether its tasks are temperature logs
+                const locked = isTemp && !!template
+                const toggle = () =>
+                  isTemp ? setIsTempLog((v) => !v) : setEvidence((ev) => ({ ...ev, [e.k]: !ev[e.k] }))
+                return (
+                  <button
+                    key={e.k}
+                    onClick={toggle}
+                    disabled={locked}
+                    title={locked ? 'Set by the template' : undefined}
+                    className={`flex items-center gap-1.5 ${chip(on)} disabled:opacity-60`}
+                  >
+                    <e.Icon size={15} /> {e.label}
+                  </button>
+                )
+              })}
             </div>
             {template && template.checklist.length > 0 && (
               <div className="mt-1.5 text-[11.5px] text-muted">

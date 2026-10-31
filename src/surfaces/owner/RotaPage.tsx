@@ -15,6 +15,7 @@ import {
 import { useToast } from '../../components/Toast'
 import { useOwnerCtx } from './OwnerLayout'
 import type { Profile, Shift } from '../../lib/types'
+import TimeField from '../../components/TimeField'
 
 const inputCls =
   'w-full rounded-xl border-[1.5px] border-ink/15 bg-white p-2.5 text-sm outline-none focus:border-brand'
@@ -117,21 +118,11 @@ function ShiftModal({
         <div className="mb-3 grid grid-cols-2 gap-3">
           <div>
             <label className={label}>Start</label>
-            <input
-              type="time"
-              value={start}
-              onChange={(e) => setStart(e.target.value)}
-              className={inputCls}
-            />
+            <TimeField value={start} onChange={setStart} label="Shift start" className={inputCls} />
           </div>
           <div>
             <label className={label}>End</label>
-            <input
-              type="time"
-              value={end}
-              onChange={(e) => setEnd(e.target.value)}
-              className={inputCls}
-            />
+            <TimeField value={end} onChange={setEnd} label="Shift end" className={inputCls} />
           </div>
         </div>
         <label className={label}>Note (optional)</label>

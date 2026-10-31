@@ -1,0 +1,213 @@
+-- Escalation becomes relative: recurrence.escalate_after_hours = whole hours after the
+-- deadline (or the trigger time when no deadline is set) before a task is marked missed and
+-- escalated. 0 = at the deadline. Replaces the absolute recurrence.escalate_at clock time,
+-- which could land before the deadline (e.g. deadline 23:30, escalate 00:15 was read as
+-- 00:15 the same morning, so the task was already past cutoff when created).
+--
+-- Existing templates are converted: hours = escalate_at - (deadline or first time), wrapping
+-- past midnight, rounded to the nearest hour. escalate_at is still honoured if present.
+
+update task_templates
+   set recurrence = (recurrence - 'escalate_at') || jsonb_build_object(
+         'escalate_after_hours',
+         greatest(0, round(extract(epoch from
+           (case when e.esc >= e.base then e.esc - e.base else (e.esc - e.base) + interval '24 hours' end)
+           ) / 3600.0)::int))
+  from (
+    select t.id,
+           (t.recurrence->>'escalate_at')::time as esc,
+           coalesce(t.recurrence->>'deadline', t.recurrence->'times'->>0)::time as base
+      from task_templates t
+     where t.recurrence ? 'escalate_at'
+       and not (t.recurrence ? 'escalate_after_hours')
+       and (t.recurrence->>'escalate_at') ~ '^\d{1,2}:\d{2}$'
+       and coalesce(t.recurrence->>'deadline', t.recurrence->'times'->>0) ~ '^\d{1,2}:\d{2}$'
+  ) e
+ where e.id = task_templates.id;
+
+create or replace function app.scheduler_tick()
+returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $function$
+declare
+  tpl record;
+  st record;
+  r record;
+  inst record;
+  t text;
+  tz text;
+  today date;
+  local_now timestamp;
+  trigger_at timestamptz;
+  due_ts timestamptz;
+  cutoff_ts timestamptz;
+  anchor_monday date;
+  k text;
+  owners uuid[];
+  leaders uuid[];
+  recips uuid[];
+begin
+  select coalesce(array_agg(id), '{}') into owners from profiles where role = 'owner';
+
+  for tpl in
+    select * from task_templates where recurrence is not null
+      and (recurrence->>'freq') in ('daily','weekly','biweekly','month_end','on_clock_in')
+  loop
+    for st in
+      select * from stores where org_id = tpl.org_id
+        and (coalesce(cardinality(tpl.store_ids), 0) = 0 or id = any(tpl.store_ids))
+    loop
+      tz := coalesce(st.timezone, 'Europe/London');
+      local_now := now() at time zone tz;
+      today := local_now::date;
+
+      if (tpl.recurrence->>'freq') = 'on_clock_in' then
+        for r in
+          select * from shift_roster
+          where store_id = st.id and clock_in_at is not null
+            and (shift_start at time zone tz)::date = today
+        loop
+          k := tpl.id || ':' || st.id || ':' || r.user_id || ':' || today;
+          if (tpl.recurrence->>'deadline_rel') = 'shift_end-2h' then
+            due_ts := r.shift_end - interval '2 hours';
+          else
+            due_ts := r.shift_end;
+          end if;
+          insert into task_instances (org_id, template_id, store_id, title, description, category,
+            priority, status, evidence, geofence_policy, is_temperature_log, due_at, cutoff_at,
+            assigned_to, generated_key)
+          values (tpl.org_id, tpl.id, st.id, tpl.title, tpl.description, tpl.category, tpl.priority,
+            'assigned', tpl.evidence, tpl.geofence_policy, tpl.is_temperature_log,
+            due_ts, r.shift_end, r.user_id, k)
+          on conflict (generated_key) do nothing;
+        end loop;
+        continue;
+      end if;
+
+      if (tpl.recurrence->>'freq') = 'month_end' then
+        if today <> (date_trunc('month', today) + interval '1 month - 1 day')::date then
+          continue;
+        end if;
+        k := tpl.id || ':' || st.id || ':' || today;
+        cutoff_ts := ((date_trunc('month', today) + interval '1 month + 4 days')::timestamp) at time zone tz;
+        insert into task_instances (org_id, template_id, store_id, title, description, category,
+          priority, status, evidence, geofence_policy, due_at, cutoff_at, generated_key)
+        values (tpl.org_id, tpl.id, st.id, tpl.title, tpl.description, tpl.category, tpl.priority,
+          'assigned', tpl.evidence, tpl.geofence_policy, null, cutoff_ts, k)
+        on conflict (generated_key) do nothing;
+        continue;
+      end if;
+
+      if (tpl.recurrence->>'freq') = 'daily'
+         and tpl.recurrence ? 'except_days'
+         and (select bool_or((v)::int = extract(isodow from local_now)::int)
+              from jsonb_array_elements_text(tpl.recurrence->'except_days') v) then
+        continue;
+      end if;
+      if (tpl.recurrence->>'freq') in ('weekly','biweekly')
+         and not coalesce((select bool_or((v)::int = extract(isodow from local_now)::int)
+              from jsonb_array_elements_text(tpl.recurrence->'byweekday') v), false) then
+        continue;
+      end if;
+      if (tpl.recurrence->>'freq') = 'biweekly' then
+        -- the anchor's week (Mon-Sun) is week 0; only even weeks since then are "on"
+        anchor_monday := case
+          when (tpl.recurrence->>'anchor') ~ '^\d{4}-\d{2}-\d{2}$' then (tpl.recurrence->>'anchor')::date
+          else date '2026-01-05'
+        end;
+        anchor_monday := anchor_monday - (extract(isodow from anchor_monday)::int - 1);
+        if today < anchor_monday or (((today - anchor_monday) / 7) % 2) <> 0 then
+          continue;
+        end if;
+      end if;
+
+      for t in select jsonb_array_elements_text(coalesce(tpl.recurrence->'times', '[]'::jsonb)) loop
+        trigger_at := (today::timestamp + t::time) at time zone tz;
+        if now() < trigger_at then continue; end if;
+        k := tpl.id || ':' || st.id || ':' || today || ':' || t;
+        if tpl.recurrence ? 'deadline' then
+          due_ts := (today::timestamp + (tpl.recurrence->>'deadline')::time) at time zone tz;
+          -- a deadline earlier than the trigger time means the next day
+          if due_ts < trigger_at then due_ts := due_ts + interval '1 day'; end if;
+        else
+          due_ts := trigger_at;
+        end if;
+        if (tpl.recurrence->>'escalate_after_hours') ~ '^\d+(\.\d+)?$' then
+          -- relative: N hours after the deadline (0 = at the deadline)
+          cutoff_ts := due_ts + ((tpl.recurrence->>'escalate_after_hours')::numeric * interval '1 hour');
+        elsif tpl.recurrence ? 'escalate_at' then
+          -- legacy absolute clock time; roll to the next day if it would precede the deadline
+          cutoff_ts := (today::timestamp + (tpl.recurrence->>'escalate_at')::time) at time zone tz;
+          if cutoff_ts < due_ts then cutoff_ts := cutoff_ts + interval '1 day'; end if;
+        else
+          cutoff_ts := null;
+        end if;
+        insert into task_instances (org_id, template_id, store_id, title, description, category,
+          priority, status, evidence, geofence_policy, is_temperature_log, due_at, cutoff_at, generated_key)
+        values (tpl.org_id, tpl.id, st.id, tpl.title, tpl.description, tpl.category, tpl.priority,
+          'assigned', tpl.evidence, tpl.geofence_policy, tpl.is_temperature_log, due_ts, cutoff_ts, k)
+        on conflict (generated_key) do nothing;
+      end loop;
+    end loop;
+  end loop;
+
+  for inst in
+    select * from task_instances
+    where status in ('scheduled','assigned','in_progress','rejected')
+      and due_at is not null and reminder_sent_at is null
+      and now() >= due_at - interval '30 minutes' and now() < due_at
+  loop
+    recips := case when inst.assigned_to is not null then array[inst.assigned_to]
+      else coalesce((select array_agg(usr.user_id) from user_store_roles usr
+                     where usr.store_id = inst.store_id and usr.role = 'staff'), '{}') end;
+    insert into notifications (org_id, user_id, type, title, body, deep_link, icon)
+    select inst.org_id, u, 'reminder', 'Due soon: ' || inst.title,
+      'Due at ' || to_char(inst.due_at at time zone 'Europe/London', 'HH24:MI'), '/staff/tasks', 'clock-countdown'
+    from unnest(recips) u;
+    update task_instances set reminder_sent_at = now() where id = inst.id;
+  end loop;
+
+  for inst in
+    select * from task_instances
+    where status in ('scheduled','assigned','in_progress','rejected')
+      and due_at is not null and overdue_notified_at is null and now() > due_at
+  loop
+    select coalesce(array_agg(usr.user_id), '{}') into leaders from user_store_roles usr
+      where usr.store_id = inst.store_id and usr.role = 'team_leader';
+    recips := leaders;
+    if inst.assigned_to is not null then recips := recips || inst.assigned_to; end if;
+    insert into notifications (org_id, user_id, type, title, body, deep_link, icon)
+    select inst.org_id, u, 'overdue', 'Overdue: ' || inst.title,
+      'Was due ' || to_char(inst.due_at at time zone 'Europe/London', 'HH24:MI'), '/staff/tasks', 'clock-countdown'
+    from unnest(recips) u;
+    update task_instances set overdue_notified_at = now() where id = inst.id;
+  end loop;
+
+  for inst in
+    select i.*, coalesce(t.recurrence->>'pending_until_complete','false') as puc
+    from task_instances i left join task_templates t on t.id = i.template_id
+    where i.status in ('scheduled','assigned','in_progress','rejected')
+      and i.cutoff_at is not null and i.escalation_created_at is null and now() > i.cutoff_at
+  loop
+    if inst.puc <> 'true' then
+      update task_instances set status = 'missed' where id = inst.id;
+    end if;
+    insert into escalations (org_id, store_id, source, title, detail, level, stage, status, instance_id, action_due_at)
+    values (inst.org_id, inst.store_id, 'missed_deadline',
+      case when inst.puc = 'true' then 'Still pending: ' || inst.title else 'Missed: ' || inst.title end,
+      'Not completed by the ' || to_char(inst.cutoff_at at time zone 'Europe/London', 'DD Mon HH24:MI') || ' cutoff. Escalated automatically.',
+      (case when inst.priority in ('high','critical') then 'critical' else 'high' end)::escalation_level,
+      'owner'::escalation_stage, 'open'::escalation_status, inst.id, now() + interval '24 hours');
+    recips := owners;
+    if inst.assigned_to is not null then recips := recips || inst.assigned_to; end if;
+    insert into notifications (org_id, user_id, type, title, body, deep_link, icon)
+    select inst.org_id, u, 'escalation',
+      case when inst.puc = 'true' then 'Escalation: ' || inst.title || ' still pending'
+           else 'Missed checklist: ' || inst.title end,
+      'Escalated to the Owner automatically', '/owner/escalations', 'warning-octagon'
+    from unnest(recips) u;
+    update task_instances set escalation_created_at = now() where id = inst.id;
+  end loop;
+end $function$;

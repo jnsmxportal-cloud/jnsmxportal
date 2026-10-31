@@ -19,7 +19,10 @@ export interface Recurrence {
   byweekday?: number[]
   deadline?: string
   reminder?: string
+  /** legacy absolute clock time; superseded by escalate_after_hours */
   escalate_at?: string
+  /** whole hours after the deadline (or trigger time) before missed + escalation; 0 = at deadline */
+  escalate_after_hours?: number
   deadline_rel?: string
   pending_until_complete?: boolean
   /** biweekly: ISO date whose week is the first "on" week; weeks alternate from there */
@@ -63,7 +66,15 @@ export function recurrenceSummary(r: Recurrence | null): string {
     return `On each clock-in · due ${r.deadline_rel === 'shift_end-2h' ? '2h before shift end' : 'at shift end'}`
   if (r.freq === 'month_end') return 'Last day of every month · pending until completed'
   const times = r.times?.length ? ` at ${r.times.join(', ')}` : ''
-  const deadline = r.deadline ? ` · deadline ${r.deadline}` : ''
+  const esc =
+    typeof r.escalate_after_hours === 'number'
+      ? r.escalate_after_hours === 0
+        ? ' · escalates at deadline'
+        : ` · escalates ${r.escalate_after_hours}h after`
+      : r.escalate_at
+        ? ` · escalates ${r.escalate_at}`
+        : ''
+  const deadline = (r.deadline ? ` · deadline ${r.deadline}` : '') + esc
   if (r.freq === 'weekly' || r.freq === 'biweekly') {
     const days = (r.byweekday ?? []).map((d) => WEEKDAYS[d - 1]).join(' & ') || 'no day set'
     if (r.freq === 'biweekly') {
