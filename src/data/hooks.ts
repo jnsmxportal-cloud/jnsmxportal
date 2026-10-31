@@ -14,6 +14,7 @@ import type {
   TaskInstance,
   TaskPriority,
 } from '../lib/types'
+import type { ChecklistDef } from './admin'
 
 // ---------- realtime: invalidate on any change ----------
 export function useRealtimeSync() {
@@ -465,6 +466,8 @@ export interface CreateTaskArgs {
   isTemperatureLog?: boolean
   /** omit to inherit from the template (DB trigger); custom tasks default to true */
   requiresApproval?: boolean
+  /** per-task checklist definition; omit/null = expand the template's checklist (DB trigger) */
+  checklist?: ChecklistDef[] | null
 }
 
 export function useCreateTask() {
@@ -489,6 +492,7 @@ export function useCreateTask() {
             geofence_policy: args.geofencePolicy ?? 'none',
             is_temperature_log: args.isTemperatureLog ?? false,
             requires_approval: args.requiresApproval ?? null,
+            checklist: args.checklist ?? null,
             due_at: args.dueAt,
             assigned_to: args.assignedTo,
           })),
