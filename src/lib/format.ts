@@ -1,4 +1,4 @@
-import { differenceInMinutes, format, isToday } from 'date-fns'
+import { differenceInMinutes, format, isToday, isTomorrow } from 'date-fns'
 
 export function timeAgo(iso: string): string {
   const mins = differenceInMinutes(new Date(), new Date(iso))
@@ -24,6 +24,14 @@ export function dueLabel(t: { due_at: string | null; status: string }): {
   }
   if (isToday(due)) return { text: `Due ${format(due, 'HH:mm')}`, overdue: false }
   return { text: `Due ${format(due, 'EEE d MMM HH:mm')}`, overdue: false }
+}
+
+/** Section heading for a due date: Today / Tomorrow (with the date as a subtitle) or the weekday + date. */
+export function dateGroupLabel(iso: string): { title: string; sub: string | null; isToday: boolean } {
+  const d = new Date(iso)
+  if (isToday(d)) return { title: 'Today', sub: format(d, 'EEE d MMM'), isToday: true }
+  if (isTomorrow(d)) return { title: 'Tomorrow', sub: format(d, 'EEE d MMM'), isToday: false }
+  return { title: format(d, 'EEEE d MMM'), sub: null, isToday: false }
 }
 
 export function todayLabel(): string {

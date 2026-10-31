@@ -20,6 +20,7 @@ import { useAuth } from '../../auth/AuthProvider'
 import { useMyTasks } from '../../data/hooks'
 import { categoryMeta, useCategories } from '../../data/categories'
 import { dueLabel } from '../../lib/format'
+import { format, isToday } from 'date-fns'
 import { Avatar } from '../../components/ui'
 import { useStaffStore } from './StaffShell'
 import { useToast } from '../../components/Toast'
@@ -45,13 +46,27 @@ export function taskTarget(t: TaskInstance): string {
   return `/staff/runner/${t.id}`
 }
 
-export function TaskRow({ t }: { t: TaskInstance }) {
+/**
+ * One task in a list. `variant="grouped"` is for lists already sectioned by date: the due
+ * time (and date, when not today) sits quietly on the right and the status line shows the
+ * category instead of repeating the deadline.
+ */
+export function TaskRow({ t, variant = 'default' }: { t: TaskInstance; variant?: 'default' | 'grouped' }) {
   const navigate = useNavigate()
   const { data: cats } = useCategories()
   const { text, overdue } = dueLabel(t)
   const color = overdue ? '#E5484D' : t.status === 'rejected' ? '#F59E0B' : '#3B82F6'
   const bg = overdue ? '#FCEBEC' : t.status === 'rejected' ? '#FEF3E2' : '#EAF1FE'
-  const RowIcon = categoryMeta(cats, t.category, t.is_temperature_log).Icon
+  const meta = categoryMeta(cats, t.category, t.is_temperature_log)
+  const RowIcon = meta.Icon
+  const due = t.due_at ? new Date(t.due_at) : null
+  const grouped = variant === 'grouped'
+  const statusLine =
+    t.status === 'rejected'
+      ? `Reopened — ${t.review_feedback ?? 'see feedback'}`
+      : grouped && !overdue
+        ? meta.name
+        : text
   return (
     <button
       onClick={() => navigate(taskTarget(t))}
@@ -66,10 +81,18 @@ export function TaskRow({ t }: { t: TaskInstance }) {
       </div>
       <div className="flex-1">
         <div className="text-sm font-semibold">{t.title}</div>
-        <div className="text-[11.5px] font-medium" style={{ color }}>
-          {t.status === 'rejected' ? `Reopened — ${t.review_feedback ?? 'see feedback'}` : text}
+        <div className="text-[11.5px] font-medium" style={{ color: grouped && !overdue && t.status !== 'rejected' ? '#8B93A4' : color }}>
+          {statusLine}
         </div>
       </div>
+      {grouped && due && (
+        <div className="flex flex-none flex-col items-end leading-tight">
+          <span className="text-[13px] font-bold tabular-nums" style={{ color: overdue ? color : '#151B28' }}>
+            {format(due, 'HH:mm')}
+          </span>
+          {!isToday(due) && <span className="text-[10.5px] text-muted">{format(due, 'd MMM')}</span>}
+        </div>
+      )}
       <CaretRight size={16} color="#C3C9D2" />
     </button>
   )
