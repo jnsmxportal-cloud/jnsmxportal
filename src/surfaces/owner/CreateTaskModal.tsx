@@ -381,7 +381,7 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
           </div>
 
           <div>
-            <label className={label}>After submit</label>
+            <label className={label}>Upon submit</label>
             <div className="flex flex-wrap gap-1.5">
               <button onClick={() => setNeedsReview(true)} className={chip(needsReview)}>
                 Needs review

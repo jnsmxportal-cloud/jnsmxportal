@@ -366,6 +366,23 @@ export default function TemplateEditor({
             )}
           </div>
 
+          <div>
+            <label className={label}>Upon submit</label>
+            <div className="flex flex-wrap gap-1.5">
+              <button onClick={() => setRequiresApproval(true)} className={chip(requiresApproval)}>
+                Needs review
+              </button>
+              <button onClick={() => setRequiresApproval(false)} className={chip(!requiresApproval)}>
+                Completes immediately
+              </button>
+            </div>
+            <div className="mt-1.5 text-[11.5px] text-muted">
+              {requiresApproval
+                ? 'Goes to the approvals queue for a Team Leader, Manager or Owner to sign off.'
+                : 'Marked completed as soon as staff submit — no sign-off step.'}
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <label className={label}>Required evidence</label>
@@ -395,15 +412,6 @@ export default function TemplateEditor({
                   </button>
                 ))}
               </div>
-              <label className="mt-2.5 flex items-center gap-2 text-xs font-semibold text-slate">
-                <input
-                  type="checkbox"
-                  checked={requiresApproval}
-                  onChange={(e) => setRequiresApproval(e.target.checked)}
-                  className="h-4 w-4 accent-[#FF5A2D]"
-                />
-                Requires review &amp; approval
-              </label>
             </div>
           </div>
 
