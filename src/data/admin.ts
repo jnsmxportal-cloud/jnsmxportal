@@ -13,7 +13,7 @@ export interface ChecklistDef {
 }
 
 export interface Recurrence {
-  freq: 'ad_hoc' | 'daily' | 'weekly' | 'month_end' | 'on_clock_in'
+  freq: 'ad_hoc' | 'daily' | 'weekly' | 'biweekly' | 'month_end' | 'on_clock_in'
   times?: string[]
   except_days?: number[]
   byweekday?: number[]
@@ -22,6 +22,8 @@ export interface Recurrence {
   escalate_at?: string
   deadline_rel?: string
   pending_until_complete?: boolean
+  /** biweekly: ISO date whose week is the first "on" week; weeks alternate from there */
+  anchor?: string
 }
 
 export interface TaskTemplate {
@@ -46,6 +48,14 @@ export interface TaskTemplate {
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
+/** Monday of the week containing an ISO date, as 'D Mon' (biweekly summaries). */
+function weekCommencing(iso: string): string {
+  const d = new Date(`${iso}T00:00:00`)
+  if (Number.isNaN(d.getTime())) return iso
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7))
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+}
+
 /** Plain-language recurrence summary per §8.3 ("Every Monday at 08:00", "Daily except Wednesday"). */
 export function recurrenceSummary(r: Recurrence | null): string {
   if (!r || r.freq === 'ad_hoc') return 'Ad-hoc — created on demand'
@@ -54,8 +64,12 @@ export function recurrenceSummary(r: Recurrence | null): string {
   if (r.freq === 'month_end') return 'Last day of every month · pending until completed'
   const times = r.times?.length ? ` at ${r.times.join(', ')}` : ''
   const deadline = r.deadline ? ` · deadline ${r.deadline}` : ''
-  if (r.freq === 'weekly') {
+  if (r.freq === 'weekly' || r.freq === 'biweekly') {
     const days = (r.byweekday ?? []).map((d) => WEEKDAYS[d - 1]).join(' & ') || 'no day set'
+    if (r.freq === 'biweekly') {
+      const from = r.anchor ? ` · from w/c ${weekCommencing(r.anchor)}` : ''
+      return `Every other ${days}${times}${deadline}${from}`
+    }
     return `Every ${days}${times}${deadline}`
   }
   const except = r.except_days?.length

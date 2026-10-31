@@ -74,9 +74,10 @@ function templateStoreIds(t: TaskTemplate): string[] {
 function scheduleProblem(t: TaskTemplate): string | null {
   const r = t.recurrence
   if (!r) return null
-  if ((r.freq === 'daily' || r.freq === 'weekly') && !r.times?.length)
+  const timed = r.freq === 'daily' || r.freq === 'weekly' || r.freq === 'biweekly'
+  if (timed && !r.times?.length)
     return 'No time of day set, so the scheduler will never generate this task.'
-  if (r.freq === 'weekly' && !r.byweekday?.length)
+  if ((r.freq === 'weekly' || r.freq === 'biweekly') && !r.byweekday?.length)
     return 'No weekday selected, so the scheduler will never generate this task.'
   return null
 }

@@ -29,10 +29,17 @@ const freqs: { id: Recurrence['freq'] | 'none'; label: string }[] = [
   { id: 'none', label: 'No schedule' },
   { id: 'daily', label: 'Daily' },
   { id: 'weekly', label: 'Weekly' },
+  { id: 'biweekly', label: 'Every 2 weeks' },
   { id: 'month_end', label: 'Month-end' },
   { id: 'on_clock_in', label: 'On clock-in' },
 ]
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
+/** today's local date as YYYY-MM-DD (default biweekly anchor) */
+function todayIso(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 const evidenceDefs = [
   { k: 'photo', label: 'Photo', Icon: Camera },
   { k: 'temp', label: 'Temperature', Icon: Thermometer },
@@ -88,6 +95,8 @@ export default function TemplateEditor({
   const [times, setTimes] = useState((template?.recurrence?.times ?? []).join(', '))
   const [exceptDays, setExceptDays] = useState<number[]>(template?.recurrence?.except_days ?? [])
   const [byweekday, setByweekday] = useState<number[]>(template?.recurrence?.byweekday ?? [])
+  // biweekly: the week containing this date is the first run week
+  const [anchor, setAnchor] = useState(template?.recurrence?.anchor ?? todayIso())
   const [deadline, setDeadline] = useState(template?.recurrence?.deadline ?? '')
   const [escalateAt, setEscalateAt] = useState(template?.recurrence?.escalate_at ?? '')
   const [deadlineRel, setDeadlineRel] = useState(template?.recurrence?.deadline_rel ?? 'shift_end')
@@ -96,7 +105,7 @@ export default function TemplateEditor({
   const buildRecurrence = (): Recurrence | null => {
     if (freq === 'none') return null
     const r: Recurrence = { freq }
-    if (freq === 'daily' || freq === 'weekly') {
+    if (freq === 'daily' || freq === 'weekly' || freq === 'biweekly') {
       const t = times
         .split(',')
         .map((s) => s.trim())
@@ -105,7 +114,8 @@ export default function TemplateEditor({
       if (deadline) r.deadline = deadline
       if (escalateAt) r.escalate_at = escalateAt
       if (freq === 'daily' && exceptDays.length) r.except_days = exceptDays
-      if (freq === 'weekly') r.byweekday = byweekday
+      if (freq === 'weekly' || freq === 'biweekly') r.byweekday = byweekday
+      if (freq === 'biweekly') r.anchor = anchor || todayIso()
     }
     if (freq === 'month_end') r.pending_until_complete = true
     if (freq === 'on_clock_in') r.deadline_rel = deadlineRel
@@ -273,12 +283,26 @@ export default function TemplateEditor({
                 </button>
               ))}
             </div>
-            {(freq === 'daily' || freq === 'weekly') && (
+            {(freq === 'daily' || freq === 'weekly' || freq === 'biweekly') && (
               <div className="flex flex-col gap-2.5 rounded-xl bg-canvas p-3">
-                {freq === 'weekly' && (
+                {(freq === 'weekly' || freq === 'biweekly') && (
                   <div>
                     <div className="mb-1.5 text-[11px] font-semibold text-slate">Days</div>
                     {weekdayToggles(byweekday, setByweekday)}
+                  </div>
+                )}
+                {freq === 'biweekly' && (
+                  <div>
+                    <div className="mb-1 text-[11px] font-semibold text-slate">First week</div>
+                    <input
+                      type="date"
+                      value={anchor}
+                      onChange={(e) => setAnchor(e.target.value)}
+                      className={`${inputCls} sm:max-w-[220px]`}
+                    />
+                    <div className="mt-1 text-[11px] text-muted">
+                      Runs on the chosen days in the week containing this date, then every other week after it.
+                    </div>
                   </div>
                 )}
                 {freq === 'daily' && (
