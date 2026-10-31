@@ -18,7 +18,7 @@ import {
 } from '../../data/hooks'
 import { timeAgo } from '../../lib/format'
 import { Avatar, Card, PrioBadge } from '../../components/ui'
-import { ApprovalActions, evidenceSummary, kindMeta, useNames } from '../owner/shared'
+import { ApprovalActions, evidenceSummary, useKindMeta, useNames } from '../owner/shared'
 
 export default function LeaderShell() {
   const { profile, stores, myStoreIds, signOut } = useAuth()
@@ -31,6 +31,7 @@ export default function LeaderShell() {
   const { data: notifs } = useNotifications()
   const markRead = useMarkNotificationsRead()
   const { userName } = useNames()
+  const kind = useKindMeta()
 
   const queue = (tasks ?? []).filter((t) => t.status === 'submitted')
   const unread = (notifs ?? []).filter((n) => !n.read_at).length
@@ -155,7 +156,7 @@ export default function LeaderShell() {
             ) : (
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                 {queue.map((a) => {
-                  const { Icon, c, b } = kindMeta(a)
+                  const { Icon, c, b } = kind(a)
                   return (
                     <Card key={a.id} className="p-[17px]">
                       <div className="mb-3 flex items-start gap-3">

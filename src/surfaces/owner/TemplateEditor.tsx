@@ -15,6 +15,7 @@ import {
 } from '@phosphor-icons/react'
 import { useAuth } from '../../auth/AuthProvider'
 import { useToast } from '../../components/Toast'
+import { categoryOptions, useCategories } from '../../data/categories'
 import {
   recurrenceSummary,
   useSaveTemplate,
@@ -23,7 +24,6 @@ import {
   type TaskTemplate,
 } from '../../data/admin'
 
-const cats = ['daily', 'weekly', 'ad_hoc', 'incident', 'delivery', 'maintenance'] as const
 const prios = ['low', 'medium', 'high', 'critical'] as const
 const freqs: { id: Recurrence['freq'] | 'none'; label: string }[] = [
   { id: 'none', label: 'No schedule' },
@@ -60,10 +60,11 @@ export default function TemplateEditor({
   const { stores } = useAuth()
   const toast = useToast()
   const save = useSaveTemplate()
+  const { data: categories } = useCategories()
 
   const [title, setTitle] = useState(template?.title ?? '')
   const [description, setDescription] = useState(template?.description ?? '')
-  const [category, setCategory] = useState<(typeof cats)[number]>(template?.category ?? 'daily')
+  const [category, setCategory] = useState<string>(template?.category ?? 'daily')
   const [priority, setPriority] = useState<(typeof prios)[number]>(template?.priority ?? 'medium')
   // store scope: [] = chain-wide, otherwise the checked store ids
   const [storeIds, setStoreIds] = useState<string[]>(
@@ -243,13 +244,13 @@ export default function TemplateEditor({
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <label className={label}>Category</label>
-              <div className="flex flex-wrap gap-1.5">
-                {cats.map((c) => (
-                  <button key={c} onClick={() => setCategory(c)} className={chip(category === c)}>
-                    {c.replace('_', '-')}
-                  </button>
+              <select value={category} onChange={(e) => setCategory(e.target.value)} className={inputCls}>
+                {categoryOptions(categories, category).map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
                 ))}
-              </div>
+              </select>
             </div>
             <div>
               <label className={label}>Priority</label>

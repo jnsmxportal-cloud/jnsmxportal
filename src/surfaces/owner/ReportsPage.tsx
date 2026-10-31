@@ -1,20 +1,12 @@
 import { useMemo, useState } from 'react'
 import { format, subDays } from 'date-fns'
-import {
-  Broom,
-  CalendarBlank,
-  FileCsv,
-  FilePdf,
-  ListChecks,
-  Thermometer,
-  Truck,
-  Warning,
-} from '@phosphor-icons/react'
+import { CalendarBlank, FileCsv, FilePdf, Thermometer, Truck } from '@phosphor-icons/react'
 import { Card } from '../../components/ui'
 import { useAuth } from '../../auth/AuthProvider'
 import { useDeliveries, useEscalations, useTasks } from '../../data/hooks'
 import { useToast } from '../../components/Toast'
 import { useOwnerCtx } from './OwnerLayout'
+import { categoryIcon, categoryMeta, tint, useCategories } from '../../data/categories'
 import { storeCompliance } from './shared'
 import type { TaskInstance } from '../../lib/types'
 
@@ -24,6 +16,7 @@ export default function ReportsPage() {
   const { data: tasks } = useTasks({ storeId: 'all' })
   const { data: deliveries } = useDeliveries('all')
   const { data: escalations } = useEscalations('all')
+  const { data: categories } = useCategories()
   const toast = useToast()
 
   // filters: header store switcher (ctx) + date range, default last 30 days
@@ -57,16 +50,25 @@ export default function ReportsPage() {
     const all = fTasks
     const completed = all.filter((t) => ['completed', 'approved'].includes(t.status))
     const count = (fn: (t: TaskInstance) => boolean) => completed.filter(fn).length
+    // two fixed rows for flows that are not plain categories, then one row per category
     const defs = [
-      { label: 'Checklists', Icon: ListChecks, c: '#16B364', b: '#E7F7EF', n: count((t) => t.category === 'daily' && !t.is_temperature_log) },
       { label: 'Temperature logs', Icon: Thermometer, c: '#E5484D', b: '#FCEBEC', n: count((t) => t.is_temperature_log) },
       { label: 'Deliveries', Icon: Truck, c: '#3B82F6', b: '#EAF1FE', n: fDeliveries.filter((d) => d.status === 'approved').length },
-      { label: 'Weekly / cleaning', Icon: Broom, c: '#0891B2', b: '#E0F5FA', n: count((t) => t.category === 'weekly') },
-      { label: 'Incidents', Icon: Warning, c: '#F59E0B', b: '#FEF3E2', n: count((t) => t.category === 'incident') },
+      ...(categories ?? [])
+        .map((c) => ({
+          label: c.name,
+          Icon: categoryIcon(c.icon),
+          c: c.color,
+          b: tint(c.color),
+          n: count((t) => t.category === c.slug && !t.is_temperature_log),
+          // archived categories (and 'delivery', counted above) only appear when they have work
+          quiet: c.archived_at !== null || c.slug === 'delivery',
+        }))
+        .filter((d) => d.n > 0 || !d.quiet),
     ]
     const max = Math.max(1, ...defs.map((d) => d.n))
     return defs.map((d) => ({ ...d, pct: Math.round((d.n / max) * 100) }))
-  }, [fTasks, fDeliveries])
+  }, [fTasks, fDeliveries, categories])
 
   const tiles = [
     { label: 'Tasks completed', value: fTasks.filter((t) => ['completed', 'approved'].includes(t.status)).length, color: '#16B364' },
@@ -84,7 +86,7 @@ export default function ReportsPage() {
       ...fTasks.map((t) => [
         t.title,
         storeNameOf(t.store_id),
-        t.category,
+        categoryMeta(categories, t.category).name,
         t.priority,
         t.status,
         t.due_at ?? '',

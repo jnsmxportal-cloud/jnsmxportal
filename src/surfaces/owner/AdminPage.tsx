@@ -12,6 +12,7 @@ import {
   Plus,
   Printer,
   QrCode as QrIcon,
+  Tag,
   Thermometer,
   Trash,
   Users as UsersIcon,
@@ -37,9 +38,11 @@ import { geoErrorReason, geoReasonHelp } from '../../lib/geo'
 import { timeAgo } from '../../lib/format'
 import { useToast } from '../../components/Toast'
 import TemplateEditor from './TemplateEditor'
+import CategoriesPanel from './CategoriesPanel'
+import { categoryMeta, useCategories } from '../../data/categories'
 import type { AppRole, Profile, Store, TaskInstance } from '../../lib/types'
 
-const tabs = ['Templates', 'Users', 'Units', 'QR codes', 'Geofence'] as const
+const tabs = ['Templates', 'Categories', 'Users', 'Units', 'QR codes', 'Geofence'] as const
 type Tab = (typeof tabs)[number]
 
 const roleLabels: Record<AppRole, string> = {
@@ -106,6 +109,7 @@ function templateStats(tasks: TaskInstance[] | undefined): Record<string, Templa
 function TemplatesPanel() {
   const { data: templates } = useTemplates()
   const { data: tasks } = useTasks({ storeId: 'all' })
+  const { data: categories } = useCategories()
   const { stores } = useAuth()
   const del = useDeleteTemplate()
   const create = useCreateTask()
@@ -172,8 +176,14 @@ function TemplatesPanel() {
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <span className="font-display text-sm font-bold">{t.title}</span>
-                <span className="rounded-full bg-canvas px-2 py-px text-[10px] font-semibold text-slate">
-                  {t.category.replace('_', '-')}
+                <span
+                  className="rounded-full px-2 py-px text-[10px] font-semibold"
+                  style={{
+                    background: categoryMeta(categories, t.category).b,
+                    color: categoryMeta(categories, t.category).c,
+                  }}
+                >
+                  {categoryMeta(categories, t.category).name}
                 </span>
                 {t.is_temperature_log && (
                   <span className="rounded-full bg-danger-soft px-2 py-px text-[10px] font-semibold text-danger">
@@ -825,6 +835,7 @@ function GeofenceCard({
 // ================= page =================
 const tabParams: Record<string, Tab> = {
   templates: 'Templates',
+  categories: 'Categories',
   users: 'Users',
   units: 'Units',
   qr: 'QR codes',
@@ -838,6 +849,7 @@ export default function AdminPage() {
   )
   const icons: Record<Tab, typeof UsersIcon> = {
     Templates: PencilSimple,
+    Categories: Tag,
     Users: UsersIcon,
     Units: Thermometer,
     'QR codes': QrIcon,
@@ -862,6 +874,7 @@ export default function AdminPage() {
         })}
       </div>
       {tab === 'Templates' && <TemplatesPanel />}
+      {tab === 'Categories' && <CategoriesPanel />}
       {tab === 'Users' && <UsersPanel />}
       {tab === 'Units' && <UnitsPanel />}
       {tab === 'QR codes' && <QrPanel />}

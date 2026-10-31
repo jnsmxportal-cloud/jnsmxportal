@@ -3,7 +3,6 @@ import {
   Broom,
   CaretRight,
   ChatCircleDots,
-  ListChecks,
   LockSimple,
   LockSimpleOpen,
   MapPin,
@@ -13,13 +12,13 @@ import {
   Receipt,
   Stack,
   Thermometer,
-  Truck,
   Warning,
   Wrench,
   type Icon,
 } from '@phosphor-icons/react'
 import { useAuth } from '../../auth/AuthProvider'
 import { useMyTasks } from '../../data/hooks'
+import { categoryMeta, useCategories } from '../../data/categories'
 import { dueLabel } from '../../lib/format'
 import { Avatar } from '../../components/ui'
 import { useStaffStore } from './StaffShell'
@@ -48,18 +47,11 @@ export function taskTarget(t: TaskInstance): string {
 
 export function TaskRow({ t }: { t: TaskInstance }) {
   const navigate = useNavigate()
+  const { data: cats } = useCategories()
   const { text, overdue } = dueLabel(t)
   const color = overdue ? '#E5484D' : t.status === 'rejected' ? '#F59E0B' : '#3B82F6'
   const bg = overdue ? '#FCEBEC' : t.status === 'rejected' ? '#FEF3E2' : '#EAF1FE'
-  const RowIcon = t.is_temperature_log
-    ? Thermometer
-    : t.category === 'delivery'
-      ? Truck
-      : t.category === 'incident'
-        ? Warning
-        : t.category === 'maintenance'
-          ? Wrench
-          : ListChecks
+  const RowIcon = categoryMeta(cats, t.category, t.is_temperature_log).Icon
   return (
     <button
       onClick={() => navigate(taskTarget(t))}

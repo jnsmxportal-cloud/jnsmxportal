@@ -10,7 +10,23 @@ export type TaskStatus =
   | 'completed'
   | 'missed'
 
-export type TaskCategory = 'daily' | 'weekly' | 'ad_hoc' | 'incident' | 'delivery' | 'maintenance'
+/** Category slug, e.g. 'daily' or 'deep_clean'. Defined per org in the categories table. */
+export type TaskCategory = string
+
+export interface Category {
+  id: string
+  org_id: string
+  slug: string
+  name: string
+  color: string
+  icon: string
+  /** the six built-ins that drive app flows; cannot be deleted */
+  is_system: boolean
+  display_order: number
+  /** set = hidden from pickers; existing templates/tasks keep it */
+  archived_at: string | null
+  created_at: string
+}
 export type TaskPriority = 'low' | 'medium' | 'high' | 'critical'
 export type DeliveryStatus = 'review' | 'verified' | 'approved' | 'rejected'
 

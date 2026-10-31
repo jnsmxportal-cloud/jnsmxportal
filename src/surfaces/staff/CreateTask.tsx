@@ -3,16 +3,11 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { ArrowLeft } from '@phosphor-icons/react'
 import { useAuth } from '../../auth/AuthProvider'
 import { useCreateTask } from '../../data/hooks'
+import { categoryOptions, useCategories } from '../../data/categories'
 import { useToast } from '../../components/Toast'
 import { useStaffStore } from './StaffShell'
 import type { TaskCategory } from '../../lib/types'
 
-const types: { label: string; cat: TaskCategory }[] = [
-  { label: 'Checklist', cat: 'daily' },
-  { label: 'Cleaning', cat: 'weekly' },
-  { label: 'Maintenance', cat: 'maintenance' },
-  { label: 'Staff note', cat: 'ad_hoc' },
-]
 const prios = ['low', 'medium', 'high'] as const
 
 export default function CreateTask() {
@@ -21,14 +16,11 @@ export default function CreateTask() {
   const { session } = useAuth()
   const store = useStaffStore()
   const create = useCreateTask()
+  const { data: categories } = useCategories()
   const prefill = (useLocation().state ?? {}) as { title?: string; category?: string }
   const [title, setTitle] = useState(prefill.title ?? '')
-  const [type, setType] = useState(
-    () => types.find((t) => t.cat === prefill.category) ?? types[0],
-  )
-  const [category, setCategory] = useState<TaskCategory>(
-    types.find((t) => t.cat === prefill.category)?.cat ?? types[0].cat,
-  )
+  // home-screen tiles pass a category; otherwise a staff task is ad-hoc
+  const [category, setCategory] = useState<TaskCategory>(prefill.category ?? 'ad_hoc')
   const [prio, setPrio] = useState<(typeof prios)[number]>('medium')
   const [due, setDue] = useState('')
 
@@ -90,25 +82,14 @@ export default function CreateTask() {
           />
         </div>
         <div>
-          <label className={label}>Type</label>
-          <div className="flex flex-wrap gap-2">
-            {types.map((t) => (
-              <button
-                key={t.label}
-                onClick={() => {
-                  setType(t)
-                  setCategory(t.cat)
-                }}
-                className={`rounded-[10px] border px-3 py-2 text-xs font-semibold ${
-                  type.label === t.label
-                    ? 'border-brand bg-brand-tint text-brand-dark'
-                    : 'border-ink/15 bg-white text-slate'
-                }`}
-              >
-                {t.label}
-              </button>
+          <label className={label}>Category</label>
+          <select value={category} onChange={(e) => setCategory(e.target.value)} className={inputCls}>
+            {categoryOptions(categories, category).map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
             ))}
-          </div>
+          </select>
         </div>
         <div>
           <label className={label}>Due date</label>

@@ -16,17 +16,10 @@ import { useAuth } from '../../auth/AuthProvider'
 import { useCreateTask, useProfiles } from '../../data/hooks'
 import { recurrenceSummary, useTemplates, type TaskTemplate } from '../../data/admin'
 import { useToast } from '../../components/Toast'
+import { categoryMeta, categoryOptions, useCategories } from '../../data/categories'
 import type { TaskCategory, TaskPriority } from '../../lib/types'
 
 const CUSTOM = 'custom'
-const cats: { id: TaskCategory; label: string }[] = [
-  { id: 'daily', label: 'Daily' },
-  { id: 'weekly', label: 'Weekly' },
-  { id: 'ad_hoc', label: 'Ad-hoc' },
-  { id: 'incident', label: 'Incident' },
-  { id: 'delivery', label: 'Delivery' },
-  { id: 'maintenance', label: 'Maintenance' },
-]
 const prios: TaskPriority[] = ['low', 'medium', 'high', 'critical']
 const evidenceDefs = [
   { k: 'photo', label: 'Photo', Icon: Camera },
@@ -54,6 +47,7 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
   const { stores } = useAuth()
   const { data: profiles } = useProfiles()
   const { data: templates } = useTemplates()
+  const { data: categories } = useCategories()
   const create = useCreateTask()
   const toast = useToast()
 
@@ -218,8 +212,14 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5 text-[13px] font-semibold">
                       <span className="truncate">{t.title}</span>
-                      <span className="rounded-full bg-canvas px-1.5 py-px text-[10px] font-semibold text-slate">
-                        {t.category.replace('_', '-')}
+                      <span
+                        className="rounded-full px-1.5 py-px text-[10px] font-semibold"
+                        style={{
+                          background: categoryMeta(categories, t.category).b,
+                          color: categoryMeta(categories, t.category).c,
+                        }}
+                      >
+                        {categoryMeta(categories, t.category).name}
                       </span>
                     </div>
                     <div className="truncate text-[11px] text-muted">
@@ -264,13 +264,13 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
           {!template && (
             <div>
               <label className={label}>Category</label>
-              <div className="flex flex-wrap gap-2">
-                {cats.map((c) => (
-                  <button key={c.id} onClick={() => setCategory(c.id)} className={chip(category === c.id)}>
-                    {c.label}
-                  </button>
+              <select value={category} onChange={(e) => setCategory(e.target.value)} className={inputCls}>
+                {categoryOptions(categories, category).map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
                 ))}
-              </div>
+              </select>
             </div>
           )}
 

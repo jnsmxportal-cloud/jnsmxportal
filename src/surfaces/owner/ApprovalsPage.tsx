@@ -3,12 +3,13 @@ import { Card, PrioBadge } from '../../components/ui'
 import { useTasks } from '../../data/hooks'
 import { timeAgo } from '../../lib/format'
 import { useOwnerCtx } from './OwnerLayout'
-import { ApprovalActions, EvidenceGallery, evidenceSummary, kindMeta, useNames } from './shared'
+import { ApprovalActions, EvidenceGallery, evidenceSummary, useKindMeta, useNames } from './shared'
 
 export default function ApprovalsPage() {
   const { storeId } = useOwnerCtx()
   const { data: tasks } = useTasks({ storeId })
   const { userName, storeName } = useNames()
+  const kind = useKindMeta()
   const queue = (tasks ?? []).filter((t) => t.status === 'submitted')
 
   if (queue.length === 0)
@@ -23,7 +24,7 @@ export default function ApprovalsPage() {
   return (
     <div className="flex max-w-[820px] animate-fade flex-col gap-3.5">
       {queue.map((t) => {
-        const { Icon, c, b } = kindMeta(t)
+        const { Icon, c, b } = kind(t)
         return (
           <Card key={t.id} className="flex gap-4 p-[18px]">
             <div

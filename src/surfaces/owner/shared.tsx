@@ -13,7 +13,8 @@ import {
   Wrench,
   File as FileIcon,
 } from '@phosphor-icons/react'
-import type { TaskInstance, Delivery, TaskCategory } from '../../lib/types'
+import type { TaskInstance, Delivery, TaskCategory, Category } from '../../lib/types'
+import { categoryMeta, useCategories } from '../../data/categories'
 import { PrioBadge } from '../../components/ui'
 import { timeAgo } from '../../lib/format'
 import { useReviewTask } from '../../data/hooks'
@@ -22,19 +23,20 @@ import { useAuth } from '../../auth/AuthProvider'
 import { useProfiles } from '../../data/hooks'
 import { evidenceSignedUrl, useEvidence, type EvidenceRow } from '../../data/ownerExtras'
 
-export function kindMeta(t: TaskInstance | { category: TaskCategory; is_temperature_log?: boolean }) {
-  if ('is_temperature_log' in t && t.is_temperature_log)
-    return { Icon: Thermometer, c: '#E5484D', b: '#FCEBEC' }
-  switch (t.category) {
-    case 'delivery':
-      return { Icon: Truck, c: '#3B82F6', b: '#EAF1FE' }
-    case 'incident':
-      return { Icon: Warning, c: '#E5484D', b: '#FCEBEC' }
-    case 'maintenance':
-      return { Icon: Wrench, c: '#B45309', b: '#FEF3E2' }
-    default:
-      return { Icon: ListChecks, c: '#16B364', b: '#E7F7EF' }
-  }
+type Kindish = TaskInstance | { category: TaskCategory; is_temperature_log?: boolean }
+
+/**
+ * Icon + colours for a task. Pass the categories list (from useCategories) to honour the
+ * owner's colours and icons; without it the built-in defaults apply.
+ */
+export function kindMeta(t: Kindish, cats?: Category[]) {
+  return categoryMeta(cats, t.category, 'is_temperature_log' in t && !!t.is_temperature_log)
+}
+
+/** kindMeta bound to the live categories table. */
+export function useKindMeta() {
+  const { data: cats } = useCategories()
+  return (t: Kindish) => kindMeta(t, cats)
 }
 
 export function useNames() {
@@ -282,7 +284,7 @@ export function ApprovalActions({ task, compact }: { task: TaskInstance; compact
 }
 
 export function ApprovalCard({ task }: { task: TaskInstance }) {
-  const { Icon, c, b } = kindMeta(task)
+  const { Icon, c, b } = useKindMeta()(task)
   const { userName, storeName } = useNames()
   return (
     <div className="border-b border-ink/5 px-[17px] py-3.5">
