@@ -14,11 +14,17 @@ import {
 } from '@phosphor-icons/react'
 import { useAuth } from '../../auth/AuthProvider'
 import { useCreateTask, useProfiles } from '../../data/hooks'
-import { recurrenceSummary, useTemplates, type ChecklistDef, type TaskTemplate } from '../../data/admin'
+import {
+  escalateAfterHours,
+  recurrenceSummary,
+  useTemplates,
+  type ChecklistDef,
+  type TaskTemplate,
+} from '../../data/admin'
 import { useToast } from '../../components/Toast'
 import { categoryMeta, categoryOptions, useCategories } from '../../data/categories'
 import type { TaskCategory, TaskPriority } from '../../lib/types'
-import { DateTimeField } from '../../components/TimeField'
+import { DateTimeField, HoursField } from '../../components/TimeField'
 import ChecklistEditor from '../../components/ChecklistEditor'
 
 const CUSTOM = 'custom'
@@ -40,6 +46,12 @@ const chip = (active: boolean) =>
   `rounded-[10px] border px-3 py-2 text-xs font-semibold ${
     active ? 'border-brand bg-brand-tint text-brand-dark' : 'border-ink/15 bg-white text-slate'
   }`
+
+/** today's local date as YYYY-MM-DD */
+function todayIso(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
 /** store ids a template is scoped to ([] = chain-wide) */
 function templateStores(t: TaskTemplate): string[] {
@@ -68,6 +80,8 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
   const [storeIds, setStoreIds] = useState<string[]>(allStoreIds)
   const [assignee, setAssignee] = useState<string>('')
   const [due, setDue] = useState<string>('')
+  // hours past the due time before the task is marked missed + escalated; null = never
+  const [escalateAfter, setEscalateAfter] = useState<number | null>(null)
   const [prio, setPrio] = useState<TaskPriority>('medium')
   const [evidence, setEvidence] = useState<Record<string, boolean>>({})
   // readings screen instead of a checklist
@@ -93,6 +107,8 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
       setNeedsReview(true)
       setGeoPolicy('none')
       setItems([])
+      setDue('')
+      setEscalateAfter(null)
       return
     }
     // copy every template field; the copies are edited freely for this task only
@@ -110,6 +126,10 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
     setNeedsReview(t.requires_approval ?? true)
     setGeoPolicy(t.geofence_policy ?? 'none')
     setItems((t.checklist ?? []).map((i) => ({ ...i })))
+    // timing: today at the template's deadline (or first run time) and its escalation delay
+    const clock = t.recurrence?.deadline ?? t.recurrence?.times?.[0]
+    setDue(clock ? `${todayIso()}T${clock}` : '')
+    setEscalateAfter(escalateAfterHours(t.recurrence))
   }
 
   const toggleStore = (id: string) =>
@@ -122,12 +142,16 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
     }
     const finalTitle = title.trim() || template?.title || 'Untitled task'
     const checklist = isTempLog ? [] : items.filter((i) => i.label.trim())
+    const dueAt = due ? new Date(due) : null
+    const cutoffAt =
+      dueAt && escalateAfter !== null ? new Date(dueAt.getTime() + escalateAfter * 3600_000) : null
     create.mutate(
       {
         title: finalTitle,
         storeIds,
         assignedTo: assignee || null,
-        dueAt: due ? new Date(due).toISOString() : null,
+        dueAt: dueAt ? dueAt.toISOString() : null,
+        cutoffAt: cutoffAt ? cutoffAt.toISOString() : null,
         priority: prio,
         category,
         evidence: { ...evidence, temp: isTempLog },
@@ -305,23 +329,54 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
-            <div>
-              <label className={label}>Assign to</label>
-              <select value={assignee} onChange={(e) => setAssignee(e.target.value)} className={inputCls}>
-                <option value="">Any on-shift</option>
-                {(profiles ?? [])
-                  .filter((p) => p.role === 'staff' || p.role === 'team_leader')
-                  .map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.full_name}
-                    </option>
-                  ))}
-              </select>
-            </div>
-            <div>
-              <label className={label}>Due date &amp; time</label>
-              <DateTimeField value={due} onChange={setDue} className={inputCls} />
+          <div>
+            <label className={label}>Assign to</label>
+            <select value={assignee} onChange={(e) => setAssignee(e.target.value)} className={inputCls}>
+              <option value="">Any on-shift</option>
+              {(profiles ?? [])
+                .filter((p) => p.role === 'staff' || p.role === 'team_leader')
+                .map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.full_name}
+                  </option>
+                ))}
+            </select>
+          </div>
+
+          <div>
+            <label className={label}>Schedule</label>
+            <div className="flex flex-col gap-2.5 rounded-xl bg-canvas p-3">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className={chip(true)}>One-off</span>
+                <span className="text-[11.5px] text-muted">
+                  Created once, now. Recurring schedules live on templates in Admin → Templates.
+                </span>
+              </div>
+              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                <div>
+                  <div className="mb-1 text-[11px] font-semibold text-slate">Due date &amp; time</div>
+                  <DateTimeField value={due} onChange={setDue} className={inputCls} />
+                  {!due && (
+                    <div className="mt-1 text-[11px] text-muted">No due time: the task never goes overdue.</div>
+                  )}
+                </div>
+                <div>
+                  <div className="mb-1 text-[11px] font-semibold text-slate">Escalate after</div>
+                  <HoursField value={escalateAfter} onChange={setEscalateAfter} className={inputCls} />
+                  <div className="mt-1 text-[11px] text-muted">
+                    {due
+                      ? 'Hours past the due time before the task is marked missed and escalated to the Owner.'
+                      : 'Needs a due time.'}
+                  </div>
+                </div>
+              </div>
+              {template?.recurrence && template.recurrence.freq !== 'ad_hoc' && (
+                <div className="rounded-lg border border-line bg-white px-3 py-2 text-[11.5px] text-slate">
+                  “{template.title}” normally runs <b>{recurrenceSummary(template.recurrence)}</b>. That schedule
+                  stays on the template and keeps generating its own tasks; this adds one extra task due at the
+                  time above.
+                </div>
+              )}
             </div>
           </div>
 

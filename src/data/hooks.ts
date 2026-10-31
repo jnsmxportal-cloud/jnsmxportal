@@ -466,6 +466,8 @@ export interface CreateTaskArgs {
   isTemperatureLog?: boolean
   /** omit to inherit from the template (DB trigger); custom tasks default to true */
   requiresApproval?: boolean
+  /** when the task is marked missed and escalated if still open; null = never */
+  cutoffAt?: string | null
   /** per-task checklist definition; omit/null = expand the template's checklist (DB trigger) */
   checklist?: ChecklistDef[] | null
 }
@@ -494,6 +496,7 @@ export function useCreateTask() {
             requires_approval: args.requiresApproval ?? null,
             checklist: args.checklist ?? null,
             due_at: args.dueAt,
+            cutoff_at: args.cutoffAt ?? null,
             assigned_to: args.assignedTo,
           })),
         )

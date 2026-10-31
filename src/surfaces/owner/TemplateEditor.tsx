@@ -13,6 +13,7 @@ import { useAuth } from '../../auth/AuthProvider'
 import { useToast } from '../../components/Toast'
 import { categoryOptions, useCategories } from '../../data/categories'
 import {
+  escalateAfterHours,
   recurrenceSummary,
   useSaveTemplate,
   type ChecklistDef,
@@ -32,24 +33,6 @@ const freqs: { id: Recurrence['freq'] | 'none'; label: string }[] = [
   { id: 'on_clock_in', label: 'On clock-in' },
 ]
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-
-/**
- * Hours-after-deadline for a template: the stored value, or derived from a legacy absolute
- * escalate_at (wrapping past midnight), or null when the template never escalates.
- */
-function legacyEscalateHours(r: Recurrence | null | undefined): number | null {
-  if (!r) return null
-  if (typeof r.escalate_after_hours === 'number') return r.escalate_after_hours
-  if (!r.escalate_at) return null
-  const base = r.deadline ?? r.times?.[0]
-  if (!base) return null
-  const mins = (s: string) => {
-    const [h, m] = s.split(':').map(Number)
-    return h * 60 + m
-  }
-  const diff = mins(r.escalate_at) - mins(base)
-  return Math.max(0, Math.round((diff < 0 ? diff + 1440 : diff) / 60))
-}
 
 /** today's local date as YYYY-MM-DD (default biweekly anchor) */
 function todayIso(): string {
@@ -116,7 +99,7 @@ export default function TemplateEditor({
   const [deadline, setDeadline] = useState(template?.recurrence?.deadline ?? '')
   // hours after the deadline before the task is marked missed + escalated; null = never
   const [escalateAfter, setEscalateAfter] = useState<number | null>(
-    legacyEscalateHours(template?.recurrence),
+    escalateAfterHours(template?.recurrence),
   )
   const [deadlineRel, setDeadlineRel] = useState(template?.recurrence?.deadline_rel ?? 'shift_end')
   const [items, setItems] = useState<ChecklistDef[]>(template?.checklist ?? [])

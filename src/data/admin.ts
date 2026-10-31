@@ -59,6 +59,24 @@ function weekCommencing(iso: string): string {
   return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
 }
 
+/**
+ * Hours-after-deadline for a recurrence: the stored value, or derived from a legacy absolute
+ * escalate_at (wrapping past midnight), or null when the template never escalates.
+ */
+export function escalateAfterHours(r: Recurrence | null | undefined): number | null {
+  if (!r) return null
+  if (typeof r.escalate_after_hours === 'number') return r.escalate_after_hours
+  if (!r.escalate_at) return null
+  const base = r.deadline ?? r.times?.[0]
+  if (!base) return null
+  const mins = (s: string) => {
+    const [h, m] = s.split(':').map(Number)
+    return h * 60 + m
+  }
+  const diff = mins(r.escalate_at) - mins(base)
+  return Math.max(0, Math.round((diff < 0 ? diff + 1440 : diff) / 60))
+}
+
 /** Plain-language recurrence summary per §8.3 ("Every Monday at 08:00", "Daily except Wednesday"). */
 export function recurrenceSummary(r: Recurrence | null): string {
   if (!r || r.freq === 'ad_hoc') return 'Ad-hoc — created on demand'
