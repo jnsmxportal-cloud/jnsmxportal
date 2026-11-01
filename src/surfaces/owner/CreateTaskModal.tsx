@@ -15,8 +15,8 @@ import {
 import { useAuth } from '../../auth/AuthProvider'
 import { useCreateTask, useProfiles } from '../../data/hooks'
 import {
-  escalateAfterHours,
   recurrenceSummary,
+  useSaveTemplate,
   useTemplates,
   type ChecklistDef,
   type TaskTemplate,
@@ -24,7 +24,14 @@ import {
 import { useToast } from '../../components/Toast'
 import { categoryMeta, categoryOptions, useCategories } from '../../data/categories'
 import type { TaskCategory, TaskPriority } from '../../lib/types'
-import { DateTimeField, HoursField } from '../../components/TimeField'
+import ScheduleEditor, {
+  buildRecurrence,
+  isRecurring,
+  scheduleDraft,
+  todayIso,
+  type ScheduleDraft,
+  type ScheduleFreq,
+} from '../../components/ScheduleEditor'
 import ChecklistEditor from '../../components/ChecklistEditor'
 
 const CUSTOM = 'custom'
@@ -47,29 +54,49 @@ const chip = (active: boolean) =>
     active ? 'border-brand bg-brand-tint text-brand-dark' : 'border-ink/15 bg-white text-slate'
   }`
 
-/** today's local date as YYYY-MM-DD */
-function todayIso(): string {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-
 /** store ids a template is scoped to ([] = chain-wide) */
 function templateStores(t: TaskTemplate): string[] {
   return t.store_ids?.length ? t.store_ids : t.store_id ? [t.store_id] : []
 }
 
+/** Why this schedule can never produce a task, or null when it can. */
+function scheduleError(d: ScheduleDraft): string | null {
+  if (d.freq === 'once' && !d.onceDue) return 'Pick a due date & time, or choose “No schedule”.'
+  const timed = d.freq === 'daily' || d.freq === 'weekly' || d.freq === 'biweekly'
+  if (timed && d.times.length === 0) return 'Add at least one time for this schedule.'
+  if ((d.freq === 'weekly' || d.freq === 'biweekly') && d.byweekday.length === 0)
+    return 'Pick at least one day for this schedule.'
+  return null
+}
+
+/** templates can only be inserted by owners here (RLS), so recurring chips are owner-only */
+const NON_OWNER_FREQS: ScheduleFreq[] = ['none', 'once']
+
+/** the schedule a picked template contributes to the form */
+function draftFromTemplate(t: TaskTemplate, canRecur: boolean): ScheduleDraft {
+  const r = t.recurrence
+  if (!r || r.freq === 'ad_hoc') return scheduleDraft(null)
+  if (canRecur || !isRecurring(r.freq)) return scheduleDraft(r)
+  // no recurring chips: fall back to one task today at the template's deadline (or first run time)
+  const clock = r.deadline ?? r.times?.[0]
+  return { ...scheduleDraft(r), freq: 'once', onceDue: clock ? `${todayIso()}T${clock}` : '' }
+}
+
 /**
- * Create a one-off task. Picking a template copies every template field into the form
- * (title, stores, instructions, category, priority, evidence, geofence policy, review flag,
- * checklist items); all of them stay editable and apply to this task only — the template
- * itself is never changed. Schedule has no equivalent here: a one-off task has a due date.
+ * Create a task. Picking a template copies every template field into the form (title, stores,
+ * instructions, category, priority, schedule, evidence, geofence policy, review flag, checklist
+ * items); all of them stay editable and apply to this task only — the template itself is never
+ * changed. Tasks don't repeat, so a recurring schedule that differs from the picked template
+ * saves a new template; the same schedule just adds one extra task to it.
  */
 export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
-  const { stores } = useAuth()
+  const { stores, profile } = useAuth()
+  const canRecur = profile?.role === 'owner'
   const { data: profiles } = useProfiles()
   const { data: templates } = useTemplates()
   const { data: categories } = useCategories()
   const create = useCreateTask()
+  const saveTemplate = useSaveTemplate()
   const toast = useToast()
 
   const allStoreIds = stores.map((s) => s.id)
@@ -79,9 +106,7 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
   const [category, setCategory] = useState<TaskCategory>('ad_hoc')
   const [storeIds, setStoreIds] = useState<string[]>(allStoreIds)
   const [assignee, setAssignee] = useState<string>('')
-  const [due, setDue] = useState<string>('')
-  // hours past the due time before the task is marked missed + escalated; null = never
-  const [escalateAfter, setEscalateAfter] = useState<number | null>(null)
+  const [schedule, setSchedule] = useState<ScheduleDraft>(() => scheduleDraft(null))
   const [prio, setPrio] = useState<TaskPriority>('medium')
   const [evidence, setEvidence] = useState<Record<string, boolean>>({})
   // readings screen instead of a checklist
@@ -92,6 +117,18 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
 
   const template =
     templateId === CUSTOM ? null : ((templates ?? []).find((t) => t.id === templateId) ?? null)
+
+  const recurrence = buildRecurrence(schedule)
+  const recurring = isRecurring(schedule.freq)
+  // the template's own schedule is already running, so nothing new needs scheduling
+  const sameAsTemplate =
+    recurring &&
+    !!template &&
+    JSON.stringify(recurrence) === JSON.stringify(buildRecurrence(scheduleDraft(template.recurrence)))
+  const savesTemplate = recurring && !sameAsTemplate
+  const extraTaskClock = schedule.deadline || schedule.times[0]
+  // same rule as the scheduler: a deadline earlier than the trigger time means the next day
+  const extraTaskNextDay = !!schedule.deadline && !!schedule.times[0] && schedule.deadline < schedule.times[0]
 
   const pickTemplate = (t: TaskTemplate | null) => {
     if (!t) {
@@ -107,8 +144,7 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
       setNeedsReview(true)
       setGeoPolicy('none')
       setItems([])
-      setDue('')
-      setEscalateAfter(null)
+      setSchedule(scheduleDraft(null))
       return
     }
     // copy every template field; the copies are edited freely for this task only
@@ -126,17 +162,7 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
     setNeedsReview(t.requires_approval ?? true)
     setGeoPolicy(t.geofence_policy ?? 'none')
     setItems((t.checklist ?? []).map((i) => ({ ...i })))
-    // timing: today at the template's deadline (or first run time) and its escalation delay
-    const clock = t.recurrence?.deadline ?? t.recurrence?.times?.[0]
-    // a one-off template carries its own due date-time
-    setDue(
-      t.recurrence?.freq === 'once' && t.recurrence.due_at
-        ? t.recurrence.due_at.slice(0, 16)
-        : clock
-          ? `${todayIso()}T${clock}`
-          : '',
-    )
-    setEscalateAfter(escalateAfterHours(t.recurrence))
+    setSchedule(draftFromTemplate(t, canRecur))
   }
 
   const toggleStore = (id: string) =>
@@ -147,11 +173,50 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
       toast('Pick at least one store', 'error')
       return
     }
+    const problem = scheduleError(schedule)
+    if (problem) {
+      toast(problem, 'error')
+      return
+    }
     const finalTitle = title.trim() || template?.title || 'Untitled task'
     const checklist = isTempLog ? [] : items.filter((i) => i.label.trim())
+    if (savesTemplate) {
+      saveTemplate.mutate(
+        {
+          title: finalTitle,
+          description: description.trim() || null,
+          category,
+          priority: prio,
+          store_ids: storeIds.length === stores.length ? null : storeIds,
+          evidence: { ...evidence, temp: isTempLog },
+          geofence_policy: geoPolicy,
+          recurrence,
+          checklist,
+          requires_approval: needsReview,
+          is_temperature_log: isTempLog,
+        },
+        {
+          onSuccess: () => {
+            toast(`Recurring template “${finalTitle}” saved — the scheduler picks it up within a minute`)
+            onClose()
+          },
+          onError: (e) => toast(e.message, 'error'),
+        },
+      )
+      return
+    }
+    const due =
+      schedule.freq === 'once'
+        ? schedule.onceDue
+        : sameAsTemplate && extraTaskClock
+          ? `${todayIso()}T${extraTaskClock}`
+          : ''
     const dueAt = due ? new Date(due) : null
+    if (dueAt && sameAsTemplate && extraTaskNextDay) dueAt.setDate(dueAt.getDate() + 1)
     const cutoffAt =
-      dueAt && escalateAfter !== null ? new Date(dueAt.getTime() + escalateAfter * 3600_000) : null
+      dueAt && schedule.escalateAfter !== null
+        ? new Date(dueAt.getTime() + schedule.escalateAfter * 3600_000)
+        : null
     create.mutate(
       {
         title: finalTitle,
@@ -204,7 +269,7 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
           </div>
           <div className="flex-1">
             <h3 className="font-display text-[17px] font-bold">Create task</h3>
-            <div className="text-xs text-muted">Start from a template or build a one-off task</div>
+            <div className="text-xs text-muted">Start from a template or build your own</div>
           </div>
           <button onClick={onClose} className="p-1 text-muted">
             <X size={20} />
@@ -223,7 +288,7 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
               >
                 <PencilSimple size={16} className="flex-none text-slate" />
                 <div className="min-w-0 flex-1">
-                  <div className="text-[13px] font-semibold">Custom one-off</div>
+                  <div className="text-[13px] font-semibold">Custom task</div>
                   <div className="text-[11px] text-muted">Blank task — fill in every detail below</div>
                 </div>
               </button>
@@ -338,7 +403,12 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
 
           <div>
             <label className={label}>Assign to</label>
-            <select value={assignee} onChange={(e) => setAssignee(e.target.value)} className={inputCls}>
+            <select
+              value={savesTemplate ? '' : assignee}
+              onChange={(e) => setAssignee(e.target.value)}
+              disabled={savesTemplate}
+              className={`${inputCls} disabled:opacity-60`}
+            >
               <option value="">Any on-shift</option>
               {(profiles ?? [])
                 .filter((p) => p.role === 'staff' || p.role === 'team_leader')
@@ -348,43 +418,48 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
                   </option>
                 ))}
             </select>
+            {savesTemplate && (
+              <div className="mt-1.5 text-[11.5px] text-muted">
+                Recurring tasks go to whoever is on shift; they can’t be assigned to one person.
+              </div>
+            )}
           </div>
 
           <div>
             <label className={label}>Schedule</label>
-            <div className="flex flex-col gap-2.5 rounded-xl bg-canvas p-3">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className={chip(true)}>One-off</span>
-                <span className="text-[11.5px] text-muted">
-                  Created once, now. Recurring schedules live on templates in Admin → Templates.
-                </span>
+            <ScheduleEditor
+              value={schedule}
+              onChange={setSchedule}
+              freqs={canRecur ? undefined : NON_OWNER_FREQS}
+              onceHint="Creates this task once, for every selected store. Staff see it under its due date; it does not repeat."
+            >
+              <div className="mt-2.5 rounded-lg border border-line bg-white px-3 py-2 text-[11.5px] text-slate empty:hidden">
+                {schedule.freq === 'none' && 'Created now with no due time, so it never goes overdue.'}
+                {schedule.freq === 'once' && template?.recurrence && isRecurring(template.recurrence.freq) && (
+                  <>
+                    “{template.title}” normally runs <b>{recurrenceSummary(template.recurrence)}</b>. That schedule
+                    stays on the template and keeps generating its own tasks; this adds one extra task due at the
+                    time above.
+                  </>
+                )}
+                {sameAsTemplate && (
+                  <>
+                    “{template?.title}” already runs on this schedule, so nothing new is scheduled. This adds one
+                    extra task {extraTaskClock ? <>{extraTaskNextDay ? 'tomorrow' : 'today'} at <b>{extraTaskClock}</b></> : 'now, with no due time'}.
+                    Choose One-off to pick another time.
+                  </>
+                )}
+                {savesTemplate &&
+                  (template ? (
+                    <>
+                      Saves a new recurring template, <b>{title.trim() || template.title}</b>, with this schedule.
+                      “{template.title}” is not changed and keeps running, so both will generate tasks.
+                    </>
+                  ) : (
+                    <>Saves this as a recurring template in Admin → Templates; the scheduler creates the tasks.</>
+                  ))}
               </div>
-              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-                <div>
-                  <div className="mb-1 text-[11px] font-semibold text-slate">Due date &amp; time</div>
-                  <DateTimeField value={due} onChange={setDue} className={inputCls} />
-                  {!due && (
-                    <div className="mt-1 text-[11px] text-muted">No due time: the task never goes overdue.</div>
-                  )}
-                </div>
-                <div>
-                  <div className="mb-1 text-[11px] font-semibold text-slate">Escalate after</div>
-                  <HoursField value={escalateAfter} onChange={setEscalateAfter} className={inputCls} />
-                  <div className="mt-1 text-[11px] text-muted">
-                    {due
-                      ? 'Hours past the due time before the task is marked missed and escalated to the Owner.'
-                      : 'Needs a due time.'}
-                  </div>
-                </div>
-              </div>
-              {template?.recurrence && !['ad_hoc', 'once'].includes(template.recurrence.freq) && (
-                <div className="rounded-lg border border-line bg-white px-3 py-2 text-[11.5px] text-slate">
-                  “{template.title}” normally runs <b>{recurrenceSummary(template.recurrence)}</b>. That schedule
-                  stays on the template and keeps generating its own tasks; this adds one extra task due at the
-                  time above.
-                </div>
-              )}
-            </div>
+            </ScheduleEditor>
           </div>
 
           <div>
@@ -470,10 +545,10 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
           </button>
           <button
             onClick={save}
-            disabled={create.isPending || storeIds.length === 0}
+            disabled={create.isPending || saveTemplate.isPending || storeIds.length === 0}
             className="flex flex-[2] items-center justify-center gap-2 rounded-xl bg-brand p-3 text-[13.5px] font-semibold text-white disabled:opacity-60"
           >
-            <Check size={15} weight="bold" /> Create &amp; assign
+            <Check size={15} weight="bold" /> {savesTemplate ? 'Save recurring task' : 'Create & assign'}
           </button>
         </div>
       </div>

@@ -13,33 +13,15 @@ import { useAuth } from '../../auth/AuthProvider'
 import { useToast } from '../../components/Toast'
 import { categoryOptions, useCategories } from '../../data/categories'
 import {
-  escalateAfterHours,
   recurrenceSummary,
   useSaveTemplate,
   type ChecklistDef,
-  type Recurrence,
   type TaskTemplate,
 } from '../../data/admin'
-import TimeField, { DateTimeField, HoursField } from '../../components/TimeField'
+import ScheduleEditor, { buildRecurrence, scheduleDraft } from '../../components/ScheduleEditor'
 import ChecklistEditor from '../../components/ChecklistEditor'
 
 const prios = ['low', 'medium', 'high', 'critical'] as const
-const freqs: { id: Recurrence['freq'] | 'none'; label: string }[] = [
-  { id: 'none', label: 'No schedule' },
-  { id: 'once', label: 'One-off' },
-  { id: 'daily', label: 'Daily' },
-  { id: 'weekly', label: 'Weekly' },
-  { id: 'biweekly', label: 'Every 2 weeks' },
-  { id: 'month_end', label: 'Month-end' },
-  { id: 'on_clock_in', label: 'On clock-in' },
-]
-const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-
-/** today's local date as YYYY-MM-DD (default biweekly anchor) */
-function todayIso(): string {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
 const evidenceDefs = [
   { k: 'photo', label: 'Photo', Icon: Camera },
   { k: 'temp', label: 'Temperature log', Icon: Thermometer },
@@ -91,45 +73,11 @@ export default function TemplateEditor({
   const [requiresApproval, setRequiresApproval] = useState(template?.requires_approval ?? true)
   // temperature logs open the readings screen (store chillers/freezers) instead of the checklist runner
   const [isTempLog, setIsTempLog] = useState(template?.is_temperature_log ?? false)
-  const [freq, setFreq] = useState<Recurrence['freq'] | 'none'>(template?.recurrence?.freq ?? 'none')
-  const [times, setTimes] = useState<string[]>(template?.recurrence?.times ?? [])
-  const [exceptDays, setExceptDays] = useState<number[]>(template?.recurrence?.except_days ?? [])
-  const [byweekday, setByweekday] = useState<number[]>(template?.recurrence?.byweekday ?? [])
-  // biweekly: the week containing this date is the first run week
-  const [anchor, setAnchor] = useState(template?.recurrence?.anchor ?? todayIso())
-  const [deadline, setDeadline] = useState(template?.recurrence?.deadline ?? '')
-  // one-off: the local due date & time ('YYYY-MM-DDTHH:MM') for the single task this template creates
-  const [onceDue, setOnceDue] = useState(template?.recurrence?.due_at ?? '')
-  // hours after the deadline before the task is marked missed + escalated; null = never
-  const [escalateAfter, setEscalateAfter] = useState<number | null>(
-    escalateAfterHours(template?.recurrence),
-  )
-  const [deadlineRel, setDeadlineRel] = useState(template?.recurrence?.deadline_rel ?? 'shift_end')
+  const [schedule, setSchedule] = useState(() => scheduleDraft(template?.recurrence))
   const [items, setItems] = useState<ChecklistDef[]>(template?.checklist ?? [])
 
-  const buildRecurrence = (): Recurrence | null => {
-    if (freq === 'none') return null
-    const r: Recurrence = { freq }
-    if (freq === 'once') {
-      if (onceDue) r.due_at = onceDue
-      if (escalateAfter !== null) r.escalate_after_hours = escalateAfter
-      return r
-    }
-    if (freq === 'daily' || freq === 'weekly' || freq === 'biweekly') {
-      if (times.length) r.times = [...times].sort()
-      if (deadline) r.deadline = deadline
-      if (escalateAfter !== null) r.escalate_after_hours = escalateAfter
-      if (freq === 'daily' && exceptDays.length) r.except_days = exceptDays
-      if (freq === 'weekly' || freq === 'biweekly') r.byweekday = byweekday
-      if (freq === 'biweekly') r.anchor = anchor || todayIso()
-    }
-    if (freq === 'month_end') r.pending_until_complete = true
-    if (freq === 'on_clock_in') r.deadline_rel = deadlineRel
-    return r
-  }
-
   const doSave = () => {
-    if (freq === 'once' && !onceDue) {
+    if (schedule.freq === 'once' && !schedule.onceDue) {
       toast('Pick a due date & time for the one-off task, or choose “No schedule”.', 'error')
       return
     }
@@ -143,7 +91,7 @@ export default function TemplateEditor({
         store_ids: chainWide ? null : storeIds,
         evidence: { ...evidence, temp: isTempLog },
         geofence_policy: geoPolicy,
-        recurrence: buildRecurrence(),
+        recurrence: buildRecurrence(schedule),
         // a temp log has no checklist: its rows come from the store's unit registry
         checklist: isTempLog ? [] : items.filter((i) => i.label.trim()),
         requires_approval: requiresApproval,
@@ -152,7 +100,7 @@ export default function TemplateEditor({
       {
         onSuccess: () => {
           toast(
-            freq === 'once'
+            schedule.freq === 'once'
               ? `Template “${title || 'Untitled'}” saved — the one-off task appears for staff within a minute`
               : `Template “${title || 'Untitled'}” saved — the scheduler picks it up within a minute`,
           )
@@ -162,26 +110,6 @@ export default function TemplateEditor({
       },
     )
   }
-
-  const weekdayToggles = (sel: number[], setSel: (v: number[]) => void) => (
-    <div className="flex gap-1.5">
-      {WEEKDAYS.map((d, ix) => {
-        const v = ix + 1
-        const on = sel.includes(v)
-        return (
-          <button
-            key={d}
-            onClick={() => setSel(on ? sel.filter((x) => x !== v) : [...sel, v].sort())}
-            className={`h-8 w-10 rounded-lg border text-[11px] font-bold ${
-              on ? 'border-brand bg-brand text-white' : 'border-ink/15 bg-white text-slate'
-            }`}
-          >
-            {d}
-          </button>
-        )
-      })}
-    </div>
-  )
 
   return (
     <div onClick={onClose} className="fixed inset-0 z-[80] flex items-center justify-center bg-navy/50 p-6">
@@ -194,7 +122,7 @@ export default function TemplateEditor({
             <h3 className="font-display text-[17px] font-bold">
               {template ? 'Edit template' : 'New template'}
             </h3>
-            <div className="text-xs text-muted">{recurrenceSummary(buildRecurrence())}</div>
+            <div className="text-xs text-muted">{recurrenceSummary(buildRecurrence(schedule))}</div>
           </div>
           <button onClick={onClose} className="p-1 text-muted">
             <X size={20} />
@@ -279,135 +207,18 @@ export default function TemplateEditor({
 
           <div>
             <label className={label}>Schedule</label>
-            <div className="mb-2.5 flex flex-wrap gap-1.5">
-              {freqs.map((f) => (
-                <button key={f.id} onClick={() => setFreq(f.id)} className={chip(freq === f.id)}>
-                  {f.label}
-                </button>
-              ))}
-            </div>
-            {freq === 'once' && (
-              <div className="flex flex-col gap-2.5 rounded-xl bg-canvas p-3">
-                <div className="text-[11.5px] text-muted">
-                  Creates this task once, for every store in scope, as soon as you save. Staff see it under its due
-                  date; it does not repeat.
+            <ScheduleEditor
+              value={schedule}
+              onChange={setSchedule}
+              onceHint="Creates this task once, for every store in scope, as soon as you save. Staff see it under its due date; it does not repeat."
+            >
+              {schedule.freq === 'once' && template?.recurrence?.freq === 'once' && (
+                <div className="mt-2.5 rounded-lg border border-line bg-white px-3 py-2 text-[11.5px] text-slate">
+                  Changing the date re-times the task if it is still open. A completed one-off does not run again —
+                  use <b>Run now</b> or the dashboard <b>New task</b> button for a repeat.
                 </div>
-                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-                  <div>
-                    <div className="mb-1 text-[11px] font-semibold text-slate">Due date &amp; time</div>
-                    <DateTimeField value={onceDue} onChange={setOnceDue} className={inputCls} />
-                    {!onceDue && <div className="mt-1 text-[11px] text-danger">Required for a one-off task.</div>}
-                  </div>
-                  <div>
-                    <div className="mb-1 text-[11px] font-semibold text-slate">Escalate after</div>
-                    <HoursField value={escalateAfter} onChange={setEscalateAfter} className={inputCls} />
-                    <div className="mt-1 text-[11px] text-muted">
-                      Hours past the due time before the task is marked missed and escalated to the Owner.
-                    </div>
-                  </div>
-                </div>
-                {template?.recurrence?.freq === 'once' && (
-                  <div className="rounded-lg border border-line bg-white px-3 py-2 text-[11.5px] text-slate">
-                    Changing the date re-times the task if it is still open. A completed one-off does not run again —
-                    use <b>Run now</b> or the dashboard <b>New task</b> button for a repeat.
-                  </div>
-                )}
-              </div>
-            )}
-            {(freq === 'daily' || freq === 'weekly' || freq === 'biweekly') && (
-              <div className="flex flex-col gap-2.5 rounded-xl bg-canvas p-3">
-                {(freq === 'weekly' || freq === 'biweekly') && (
-                  <div>
-                    <div className="mb-1.5 text-[11px] font-semibold text-slate">Days</div>
-                    {weekdayToggles(byweekday, setByweekday)}
-                  </div>
-                )}
-                {freq === 'biweekly' && (
-                  <div>
-                    <div className="mb-1 text-[11px] font-semibold text-slate">First week</div>
-                    <input
-                      type="date"
-                      value={anchor}
-                      onChange={(e) => setAnchor(e.target.value)}
-                      className={`${inputCls} sm:max-w-[220px]`}
-                    />
-                    <div className="mt-1 text-[11px] text-muted">
-                      Runs on the chosen days in the week containing this date, then every other week after it.
-                    </div>
-                  </div>
-                )}
-                {freq === 'daily' && (
-                  <div>
-                    <div className="mb-1.5 text-[11px] font-semibold text-slate">Except days</div>
-                    {weekdayToggles(exceptDays, setExceptDays)}
-                  </div>
-                )}
-                <div>
-                  <div className="mb-1 text-[11px] font-semibold text-slate">Times</div>
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {times.map((t) => (
-                      <span
-                        key={t}
-                        className="flex items-center gap-1 rounded-[10px] border border-brand bg-brand-tint px-2.5 py-1.5 text-xs font-semibold text-brand-dark"
-                      >
-                        {t}
-                        <button
-                          onClick={() => setTimes((a) => a.filter((x) => x !== t))}
-                          aria-label={`Remove ${t}`}
-                          className="rounded p-0.5 hover:text-danger"
-                        >
-                          <X size={11} weight="bold" />
-                        </button>
-                      </span>
-                    ))}
-                    <TimeField
-                      value=""
-                      onChange={(t) => t && setTimes((a) => (a.includes(t) ? a : [...a, t].sort()))}
-                      placeholder="+ Add time"
-                      label="Add a time"
-                      className="rounded-[10px] border border-dashed border-ink/25 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate"
-                    />
-                  </div>
-                  {times.length === 0 && (
-                    <div className="mt-1 text-[11px] text-muted">A task is created at each time on every scheduled day.</div>
-                  )}
-                </div>
-                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-                  <div>
-                    <div className="mb-1 text-[11px] font-semibold text-slate">Deadline</div>
-                    <TimeField
-                      value={deadline}
-                      onChange={setDeadline}
-                      clearable
-                      placeholder="Same as the trigger time"
-                      label="Deadline"
-                      className={inputCls}
-                    />
-                  </div>
-                  <div>
-                    <div className="mb-1 text-[11px] font-semibold text-slate">Escalate after</div>
-                    <HoursField value={escalateAfter} onChange={setEscalateAfter} className={inputCls} />
-                    <div className="mt-1 text-[11px] text-muted">
-                      Hours past the deadline before the task is marked missed and escalated to the Owner.
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-            {freq === 'on_clock_in' && (
-              <div className="rounded-xl bg-canvas p-3">
-                <div className="mb-1 text-[11px] font-semibold text-slate">Deadline relative to shift</div>
-                <select value={deadlineRel} onChange={(e) => setDeadlineRel(e.target.value)} className={inputCls}>
-                  <option value="shift_end">At shift end / clock-out</option>
-                  <option value="shift_end-2h">2 hours before shift end</option>
-                </select>
-              </div>
-            )}
-            {freq === 'month_end' && (
-              <div className="rounded-xl bg-canvas p-3 text-xs text-slate">
-                Created on the last day of every month · stays <b>Pending until completed</b> · escalates to Owner + staff on the 5th of the following month.
-              </div>
-            )}
+              )}
+            </ScheduleEditor>
           </div>
 
           <div>
