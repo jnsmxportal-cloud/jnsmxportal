@@ -5,6 +5,7 @@ import {
   ArrowsClockwise,
   Check,
   Crosshair,
+  ListChecks,
   MapPin,
   Password,
   PencilSimple,
@@ -39,10 +40,11 @@ import { timeAgo } from '../../lib/format'
 import { useToast } from '../../components/Toast'
 import TemplateEditor from './TemplateEditor'
 import CategoriesPanel from './CategoriesPanel'
+import TasksPanel from './TasksPanel'
 import { categoryMeta, useCategories } from '../../data/categories'
 import type { AppRole, Profile, Store, TaskInstance } from '../../lib/types'
 
-const tabs = ['Templates', 'Categories', 'Users', 'Units', 'QR codes', 'Geofence'] as const
+const tabs = ['Templates', 'Tasks', 'Categories', 'Users', 'Units', 'QR codes', 'Geofence'] as const
 type Tab = (typeof tabs)[number]
 
 const roleLabels: Record<AppRole, string> = {
@@ -838,6 +840,7 @@ function GeofenceCard({
 // ================= page =================
 const tabParams: Record<string, Tab> = {
   templates: 'Templates',
+  tasks: 'Tasks',
   categories: 'Categories',
   users: 'Users',
   units: 'Units',
@@ -852,6 +855,7 @@ export default function AdminPage() {
   )
   const icons: Record<Tab, typeof UsersIcon> = {
     Templates: PencilSimple,
+    Tasks: ListChecks,
     Categories: Tag,
     Users: UsersIcon,
     Units: Thermometer,
@@ -877,6 +881,7 @@ export default function AdminPage() {
         })}
       </div>
       {tab === 'Templates' && <TemplatesPanel />}
+      {tab === 'Tasks' && <TasksPanel />}
       {tab === 'Categories' && <CategoriesPanel />}
       {tab === 'Users' && <UsersPanel />}
       {tab === 'Units' && <UnitsPanel />}

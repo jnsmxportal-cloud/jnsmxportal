@@ -9,6 +9,7 @@ export type TaskStatus =
   | 'rejected'
   | 'completed'
   | 'missed'
+  | 'cancelled'
 
 /** Category slug, e.g. 'daily' or 'deep_clean'. Defined per org in the categories table. */
 export type TaskCategory = string
