@@ -426,7 +426,15 @@ export default function TemplateEditor({
               {items.length > 0 && ' Existing checklist items will be dropped when you save.'}
             </div>
           ) : (
-            <ChecklistEditor items={items} onChange={setItems} />
+            <ChecklistEditor
+              items={items}
+              onChange={setItems}
+              hint={
+                evidence.photo
+                  ? 'Photo evidence is on, so staff must attach at least one photo of the finished task before they can submit. Camera toggles below require a photo per item.'
+                  : 'Photo, temperature and QR checks are enforced per item.'
+              }
+            />
           )}
         </div>
 

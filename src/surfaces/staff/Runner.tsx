@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft,
   Camera,
@@ -18,6 +19,7 @@ import {
   useToggleChecklistItem,
 } from '../../data/hooks'
 import { useToast } from '../../components/Toast'
+import { useEvidence } from '../../data/ownerExtras'
 import GeoChip, { GeoNotice, useGeofence } from './GeoChip'
 import { useStaffStore } from './StaffShell'
 import QrScanner from '../../components/QrScanner'
@@ -213,28 +215,48 @@ export default function Runner() {
   const submit = useSubmitChecklist()
   const sig = useSignature()
   const fileRef = useRef<HTMLInputElement>(null)
+  // the checklist item a photo is for; null = a task-level photo (the template's "Photo" evidence chip)
   const photoItem = useRef<ChecklistItem | null>(null)
   const [qrItem, setQrItem] = useState<ChecklistItem | null>(null)
   const toggle = useToggleChecklistItem()
+  const qc = useQueryClient()
+  const { data: evidenceRows } = useEvidence(id ?? null)
+  const [uploading, setUploading] = useState(false)
 
   const done = (items ?? []).filter((i) => i.checked).length
   const total = (items ?? []).length
   const progress = total === 0 ? 0 : Math.round((done / total) * 100)
   const requiresSig = instance?.evidence?.signature
+  // task-level photo requirement: at least one photo must be attached to the task (any item or the
+  // task itself) before it can be submitted — the per-item camera toggles are enforced separately
+  const requiresPhoto = !!instance?.evidence?.photo
+  const taskPhotos = (evidenceRows ?? []).filter((e) => e.type === 'photo' && e.storage_path)
+  const photoOk = !requiresPhoto || taskPhotos.length > 0
   const noLocation = geo?.verdict === 'unknown'
   const blocked =
     instance?.geofence_policy === 'block' &&
     (geo?.verdict === 'off_site' || noLocation)
-  const canSubmit = (total === 0 || done === total) && (!requiresSig || sig.signed) && !blocked
+  const canSubmit =
+    (total === 0 || done === total) && (!requiresSig || sig.signed) && photoOk && !blocked
 
-  const onPhoto = (item: ChecklistItem) => {
+  const onPhoto = (item: ChecklistItem | null) => {
     photoItem.current = item
     fileRef.current?.click()
   }
 
   const onFile = async (f: File | undefined) => {
     const item = photoItem.current
-    if (!f || !item || !instance) return
+    if (!f || !instance) return
+    setUploading(true)
+    try {
+      await uploadPhoto(f, item)
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const uploadPhoto = async (f: File, item: ChecklistItem | null) => {
+    if (!instance) return
     let compressed: Blob
     try {
       compressed = await compressImage(f)
@@ -242,7 +264,7 @@ export default function Runner() {
       toast(e instanceof Error ? e.message : 'Could not process the photo', 'error')
       return
     }
-    const path = `${ORG_ID}/${instance.id}/${item.id}-${Date.now()}.jpg`
+    const path = `${ORG_ID}/${instance.id}/${item ? item.id : 'task'}-${Date.now()}.jpg`
     const { error } = await supabase.storage
       .from('evidence')
       .upload(path, compressed, { upsert: false, contentType: 'image/jpeg' })
@@ -250,10 +272,10 @@ export default function Runner() {
       toast(`Upload failed: ${error.message}`, 'error')
       return
     }
-    await supabase.from('evidence').insert({
+    const { error: rowError } = await supabase.from('evidence').insert({
       org_id: ORG_ID,
       instance_id: instance.id,
-      item_id: item.id,
+      item_id: item?.id ?? null,
       type: 'photo',
       storage_path: path,
       uploader: session!.user.id,
@@ -263,10 +285,16 @@ export default function Runner() {
       gps_accuracy: geo?.accuracy,
       geofence_verdict: geo?.verdict ?? 'unknown',
     })
-    toggle.mutate(
-      { item, patch: { photo_count: item.photo_count + 1, checked: true } },
-      { onError: (e) => toast(e.message, 'error') },
-    )
+    if (rowError) {
+      toast(`Could not save the photo: ${rowError.message}`, 'error')
+      return
+    }
+    qc.invalidateQueries({ queryKey: ['evidence', instance.id] })
+    if (item)
+      toggle.mutate(
+        { item, patch: { photo_count: item.photo_count + 1, checked: true } },
+        { onError: (e) => toast(e.message, 'error') },
+      )
     toast('Photo captured & stamped', 'success')
   }
 
@@ -355,7 +383,11 @@ export default function Runner() {
         accept="image/*"
         capture="environment"
         className="hidden"
-        onChange={(e) => onFile(e.target.files?.[0])}
+        onChange={(e) => {
+          onFile(e.target.files?.[0])
+          // reset so the same file / a retake can be picked again
+          e.target.value = ''
+        }}
       />
       <div className="sticky top-0 z-20 border-b border-line bg-white px-4 pb-2.5 pt-2">
         <div className="mb-2.5 flex items-center gap-2.5">
@@ -382,6 +414,55 @@ export default function Runner() {
         {(items ?? []).map((it) => (
           <ItemRow key={it.id} item={it} onPhoto={onPhoto} onQr={setQrItem} />
         ))}
+
+        {requiresPhoto && (
+          <div className="mb-2.5 rounded-[14px] border border-line bg-white p-3.5">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="flex items-center gap-1.5 text-[13.5px] font-semibold">
+                <Camera size={17} color="#FF5A2D" /> Photo evidence
+              </span>
+              <span
+                className="rounded-full px-2 py-0.5 text-[10px] font-bold"
+                style={{
+                  color: photoOk ? '#0E9152' : '#E8481F',
+                  background: photoOk ? '#E7F7EF' : '#FFF6F2',
+                }}
+              >
+                {photoOk ? `${taskPhotos.length} attached ✓` : 'Required'}
+              </span>
+            </div>
+            <div className="mb-2 text-[11.5px] leading-relaxed text-muted">
+              Take at least one photo of the finished task. It is stamped with time and location and goes
+              to the reviewer with your submission.
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {taskPhotos.map((e) => (
+                <div
+                  key={e.id}
+                  className="flex h-[46px] w-[46px] items-center justify-center rounded-[10px] border border-ink/5"
+                  style={{
+                    background:
+                      'repeating-linear-gradient(45deg,#eef0f3,#eef0f3 5px,#e4e7ec 5px,#e4e7ec 10px)',
+                  }}
+                >
+                  <CheckCircle size={16} weight="fill" color="#16B364" />
+                </div>
+              ))}
+              <button
+                onClick={() => onPhoto(null)}
+                disabled={uploading}
+                className="flex h-[46px] items-center gap-1.5 rounded-[10px] border-[1.5px] border-dashed px-3 text-[12.5px] font-semibold disabled:opacity-60"
+                style={{
+                  borderColor: photoOk ? 'rgba(21,27,40,.2)' : 'rgba(255,90,45,.6)',
+                  background: photoOk ? '#F9FAFB' : '#FFF6F2',
+                  color: photoOk ? '#8B93A4' : '#E8481F',
+                }}
+              >
+                <Camera size={18} /> {uploading ? 'Saving…' : taskPhotos.length ? 'Add another' : 'Take photo'}
+              </button>
+            </div>
+          </div>
+        )}
 
         {requiresSig && (
           <div className="mt-1 rounded-[14px] border border-line bg-white p-3.5">
@@ -460,7 +541,9 @@ export default function Runner() {
               : 'Blocked — outside geofence'
             : canSubmit
               ? 'Submit checklist'
-              : `Complete all items${requiresSig ? ' & sign' : ''} to submit`}
+              : `Complete all items${requiresPhoto && !photoOk ? ', add a photo' : ''}${
+                  requiresSig ? ' & sign' : ''
+                } to submit`}
         </button>
       </div>
     </div>

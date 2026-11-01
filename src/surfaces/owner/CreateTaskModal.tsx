@@ -441,11 +441,15 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
             <ChecklistEditor
               items={items}
               onChange={setItems}
-              hint={
+              hint={`${
                 template
                   ? 'Copied from the template — edits apply to this task only.'
                   : 'Photo, temperature and QR checks are enforced per item.'
-              }
+              }${
+                evidence.photo
+                  ? ' Photo evidence is on, so staff must also attach at least one photo of the finished task before they can submit.'
+                  : ''
+              }`}
             />
           )}
         </div>
