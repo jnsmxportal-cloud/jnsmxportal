@@ -74,6 +74,8 @@ function templateStoreIds(t: TaskTemplate): string[] {
 function scheduleProblem(t: TaskTemplate): string | null {
   const r = t.recurrence
   if (!r) return null
+  if (r.freq === 'once' && !r.due_at)
+    return 'No due date set, so the one-off task will never be created.'
   const timed = r.freq === 'daily' || r.freq === 'weekly' || r.freq === 'biweekly'
   if (timed && !r.times?.length)
     return 'No time of day set, so the scheduler will never generate this task.'

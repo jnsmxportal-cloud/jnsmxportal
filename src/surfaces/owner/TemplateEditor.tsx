@@ -20,12 +20,13 @@ import {
   type Recurrence,
   type TaskTemplate,
 } from '../../data/admin'
-import TimeField, { HoursField } from '../../components/TimeField'
+import TimeField, { DateTimeField, HoursField } from '../../components/TimeField'
 import ChecklistEditor from '../../components/ChecklistEditor'
 
 const prios = ['low', 'medium', 'high', 'critical'] as const
 const freqs: { id: Recurrence['freq'] | 'none'; label: string }[] = [
   { id: 'none', label: 'No schedule' },
+  { id: 'once', label: 'One-off' },
   { id: 'daily', label: 'Daily' },
   { id: 'weekly', label: 'Weekly' },
   { id: 'biweekly', label: 'Every 2 weeks' },
@@ -97,6 +98,8 @@ export default function TemplateEditor({
   // biweekly: the week containing this date is the first run week
   const [anchor, setAnchor] = useState(template?.recurrence?.anchor ?? todayIso())
   const [deadline, setDeadline] = useState(template?.recurrence?.deadline ?? '')
+  // one-off: the local due date & time ('YYYY-MM-DDTHH:MM') for the single task this template creates
+  const [onceDue, setOnceDue] = useState(template?.recurrence?.due_at ?? '')
   // hours after the deadline before the task is marked missed + escalated; null = never
   const [escalateAfter, setEscalateAfter] = useState<number | null>(
     escalateAfterHours(template?.recurrence),
@@ -107,6 +110,11 @@ export default function TemplateEditor({
   const buildRecurrence = (): Recurrence | null => {
     if (freq === 'none') return null
     const r: Recurrence = { freq }
+    if (freq === 'once') {
+      if (onceDue) r.due_at = onceDue
+      if (escalateAfter !== null) r.escalate_after_hours = escalateAfter
+      return r
+    }
     if (freq === 'daily' || freq === 'weekly' || freq === 'biweekly') {
       if (times.length) r.times = [...times].sort()
       if (deadline) r.deadline = deadline
@@ -121,6 +129,10 @@ export default function TemplateEditor({
   }
 
   const doSave = () => {
+    if (freq === 'once' && !onceDue) {
+      toast('Pick a due date & time for the one-off task, or choose “No schedule”.', 'error')
+      return
+    }
     save.mutate(
       {
         id: template?.id,
@@ -139,7 +151,11 @@ export default function TemplateEditor({
       },
       {
         onSuccess: () => {
-          toast(`Template “${title || 'Untitled'}” saved — the scheduler picks it up within a minute`)
+          toast(
+            freq === 'once'
+              ? `Template “${title || 'Untitled'}” saved — the one-off task appears for staff within a minute`
+              : `Template “${title || 'Untitled'}” saved — the scheduler picks it up within a minute`,
+          )
           onClose()
         },
         onError: (e) => toast(e.message, 'error'),
@@ -270,6 +286,34 @@ export default function TemplateEditor({
                 </button>
               ))}
             </div>
+            {freq === 'once' && (
+              <div className="flex flex-col gap-2.5 rounded-xl bg-canvas p-3">
+                <div className="text-[11.5px] text-muted">
+                  Creates this task once, for every store in scope, as soon as you save. Staff see it under its due
+                  date; it does not repeat.
+                </div>
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                  <div>
+                    <div className="mb-1 text-[11px] font-semibold text-slate">Due date &amp; time</div>
+                    <DateTimeField value={onceDue} onChange={setOnceDue} className={inputCls} />
+                    {!onceDue && <div className="mt-1 text-[11px] text-danger">Required for a one-off task.</div>}
+                  </div>
+                  <div>
+                    <div className="mb-1 text-[11px] font-semibold text-slate">Escalate after</div>
+                    <HoursField value={escalateAfter} onChange={setEscalateAfter} className={inputCls} />
+                    <div className="mt-1 text-[11px] text-muted">
+                      Hours past the due time before the task is marked missed and escalated to the Owner.
+                    </div>
+                  </div>
+                </div>
+                {template?.recurrence?.freq === 'once' && (
+                  <div className="rounded-lg border border-line bg-white px-3 py-2 text-[11.5px] text-slate">
+                    Changing the date re-times the task if it is still open. A completed one-off does not run again —
+                    use <b>Run now</b> or the dashboard <b>New task</b> button for a repeat.
+                  </div>
+                )}
+              </div>
+            )}
             {(freq === 'daily' || freq === 'weekly' || freq === 'biweekly') && (
               <div className="flex flex-col gap-2.5 rounded-xl bg-canvas p-3">
                 {(freq === 'weekly' || freq === 'biweekly') && (

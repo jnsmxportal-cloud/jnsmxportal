@@ -128,7 +128,14 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
     setItems((t.checklist ?? []).map((i) => ({ ...i })))
     // timing: today at the template's deadline (or first run time) and its escalation delay
     const clock = t.recurrence?.deadline ?? t.recurrence?.times?.[0]
-    setDue(clock ? `${todayIso()}T${clock}` : '')
+    // a one-off template carries its own due date-time
+    setDue(
+      t.recurrence?.freq === 'once' && t.recurrence.due_at
+        ? t.recurrence.due_at.slice(0, 16)
+        : clock
+          ? `${todayIso()}T${clock}`
+          : '',
+    )
     setEscalateAfter(escalateAfterHours(t.recurrence))
   }
 
@@ -370,7 +377,7 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
                   </div>
                 </div>
               </div>
-              {template?.recurrence && template.recurrence.freq !== 'ad_hoc' && (
+              {template?.recurrence && !['ad_hoc', 'once'].includes(template.recurrence.freq) && (
                 <div className="rounded-lg border border-line bg-white px-3 py-2 text-[11.5px] text-slate">
                   “{template.title}” normally runs <b>{recurrenceSummary(template.recurrence)}</b>. That schedule
                   stays on the template and keeps generating its own tasks; this adds one extra task due at the

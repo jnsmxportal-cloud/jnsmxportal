@@ -13,7 +13,9 @@ export interface ChecklistDef {
 }
 
 export interface Recurrence {
-  freq: 'ad_hoc' | 'daily' | 'weekly' | 'biweekly' | 'month_end' | 'on_clock_in'
+  freq: 'ad_hoc' | 'once' | 'daily' | 'weekly' | 'biweekly' | 'month_end' | 'on_clock_in'
+  /** once: local due date-time 'YYYY-MM-DDTHH:MM' (store timezone); the scheduler creates one task per store */
+  due_at?: string
   times?: string[]
   except_days?: number[]
   byweekday?: number[]
@@ -77,9 +79,27 @@ export function escalateAfterHours(r: Recurrence | null | undefined): number | n
   return Math.max(0, Math.round((diff < 0 ? diff + 1440 : diff) / 60))
 }
 
+/** 'YYYY-MM-DDTHH:MM' → 'Mon 3 Nov 14:00' (no timezone conversion: the value is already local) */
+export function formatLocalDateTime(v: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(v)
+  if (!m) return v
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]))
+  const day = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
+  return `${day} ${m[4]}:${m[5]}`
+}
+
 /** Plain-language recurrence summary per §8.3 ("Every Monday at 08:00", "Daily except Wednesday"). */
 export function recurrenceSummary(r: Recurrence | null): string {
   if (!r || r.freq === 'ad_hoc') return 'Ad-hoc — created on demand'
+  if (r.freq === 'once') {
+    const esc =
+      typeof r.escalate_after_hours === 'number'
+        ? r.escalate_after_hours === 0
+          ? ' · escalates at the due time'
+          : ` · escalates ${r.escalate_after_hours}h after`
+        : ''
+    return r.due_at ? `One-off · due ${formatLocalDateTime(r.due_at)}${esc}` : 'One-off · no due date set'
+  }
   if (r.freq === 'on_clock_in')
     return `On each clock-in · due ${r.deadline_rel === 'shift_end-2h' ? '2h before shift end' : 'at shift end'}`
   if (r.freq === 'month_end') return 'Last day of every month · pending until completed'
