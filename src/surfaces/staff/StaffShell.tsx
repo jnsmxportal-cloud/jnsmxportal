@@ -40,6 +40,10 @@ const tabs = [
 export default function StaffShell() {
   const location = useLocation()
   const navigate = useNavigate()
+  const { profile } = useAuth()
+  // SCRUM-10: staff cannot create tasks — managers and team leaders raise them
+  const canCreate = profile?.role !== 'staff'
+  const visibleTabs = tabs.filter((tb) => tb.id !== 'new' || canCreate)
   const isFlow =
     ['/staff/runner', '/staff/temp', '/staff/delivery', '/staff/incident', '/staff/success', '/staff/new', '/staff/invoice'].some(
       (p) => location.pathname.startsWith(p),
@@ -59,7 +63,7 @@ export default function StaffShell() {
           <Route path="delivery" element={<DeliveryWizard />} />
           <Route path="incident" element={<Incident />} />
           <Route path="success" element={<Success />} />
-          <Route path="new" element={<CreateTask />} />
+          <Route path="new" element={canCreate ? <CreateTask /> : <Navigate to="/staff" replace />} />
           <Route path="invoice" element={<InvoiceUpload />} />
           <Route path="inbox" element={<InboxList />} />
           <Route path="inbox/:threadId" element={<InboxThread />} />
@@ -69,7 +73,7 @@ export default function StaffShell() {
 
       {!isFlow && (
         <div className="z-30 flex h-16 flex-none items-center border-t border-line bg-white px-2 pb-1">
-          {tabs.map((tb) => {
+          {visibleTabs.map((tb) => {
             const active =
               tb.to === '/staff'
                 ? location.pathname === '/staff'

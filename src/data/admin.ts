@@ -19,7 +19,17 @@ export interface Recurrence {
   times?: string[]
   except_days?: number[]
   byweekday?: number[]
+  /** template-wide deadline (HH:MM); superseded per time by `deadlines` */
   deadline?: string
+  /**
+   * Deadline per run time, keyed by the entry in `times`. When present, a time without an entry
+   * is due at its trigger time (the scheduler ignores `deadline` then).
+   */
+  deadlines?: Record<string, string>
+  /** label per run time, appended to generated task titles: "Chiller temp · Morning" */
+  labels?: Record<string, string>
+  /** assign each generated task to whoever the rota has on shift at the trigger time */
+  assign_on_shift?: boolean
   reminder?: string
   /** legacy absolute clock time; superseded by escalate_after_hours */
   escalate_at?: string
@@ -61,6 +71,11 @@ function weekCommencing(iso: string): string {
   return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
 }
 
+/** The deadline (HH:MM) that applies to one run time — same rule as the scheduler. */
+export function slotDeadline(r: Recurrence, time: string): string | undefined {
+  return r.deadlines ? r.deadlines[time] || undefined : r.deadline || undefined
+}
+
 /**
  * Hours-after-deadline for a recurrence: the stored value, or derived from a legacy absolute
  * escalate_at (wrapping past midnight), or null when the template never escalates.
@@ -69,7 +84,7 @@ export function escalateAfterHours(r: Recurrence | null | undefined): number | n
   if (!r) return null
   if (typeof r.escalate_after_hours === 'number') return r.escalate_after_hours
   if (!r.escalate_at) return null
-  const base = r.deadline ?? r.times?.[0]
+  const base = (r.times?.[0] && slotDeadline(r, r.times[0])) ?? r.times?.[0]
   if (!base) return null
   const mins = (s: string) => {
     const [h, m] = s.split(':').map(Number)
@@ -103,7 +118,13 @@ export function recurrenceSummary(r: Recurrence | null): string {
   if (r.freq === 'on_clock_in')
     return `On each clock-in · due ${r.deadline_rel === 'shift_end-2h' ? '2h before shift end' : 'at shift end'}`
   if (r.freq === 'month_end') return 'Last day of every month · pending until completed'
-  const times = r.times?.length ? ` at ${r.times.join(', ')}` : ''
+  // each run time with its label and deadline: "Morning 07:00 → 09:00, Evening 19:00 → 21:00"
+  const slot = (t: string) => {
+    const label = r.labels?.[t]?.trim()
+    const dl = slotDeadline(r, t)
+    return `${label ? `${label} ` : ''}${t}${dl && dl !== t ? ` → ${dl}` : ''}`
+  }
+  const times = r.times?.length ? ` at ${r.times.map(slot).join(', ')}` : ''
   const esc =
     typeof r.escalate_after_hours === 'number'
       ? r.escalate_after_hours === 0
@@ -112,7 +133,7 @@ export function recurrenceSummary(r: Recurrence | null): string {
       : r.escalate_at
         ? ` · escalates ${r.escalate_at}`
         : ''
-  const deadline = (r.deadline ? ` · deadline ${r.deadline}` : '') + esc
+  const deadline = esc + (r.assign_on_shift ? ' · assigned from the rota' : '')
   if (r.freq === 'weekly' || r.freq === 'biweekly') {
     const days = (r.byweekday ?? []).map((d) => WEEKDAYS[d - 1]).join(' & ') || 'no day set'
     if (r.freq === 'biweekly') {

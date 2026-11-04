@@ -26,6 +26,7 @@ import { categoryMeta, categoryOptions, useCategories } from '../../data/categor
 import type { TaskCategory, TaskPriority } from '../../lib/types'
 import ScheduleEditor, {
   buildRecurrence,
+  firstSlotDeadline,
   isRecurring,
   scheduleDraft,
   todayIso,
@@ -78,8 +79,9 @@ function draftFromTemplate(t: TaskTemplate, canRecur: boolean): ScheduleDraft {
   if (!r || r.freq === 'ad_hoc') return scheduleDraft(null)
   if (canRecur || !isRecurring(r.freq)) return scheduleDraft(r)
   // no recurring chips: fall back to one task today at the template's deadline (or first run time)
-  const clock = r.deadline ?? r.times?.[0]
-  return { ...scheduleDraft(r), freq: 'once', onceDue: clock ? `${todayIso()}T${clock}` : '' }
+  const draft = scheduleDraft(r)
+  const clock = firstSlotDeadline(draft) || r.times?.[0]
+  return { ...draft, freq: 'once', onceDue: clock ? `${todayIso()}T${clock}` : '' }
 }
 
 /**
@@ -126,9 +128,10 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
     !!template &&
     JSON.stringify(recurrence) === JSON.stringify(buildRecurrence(scheduleDraft(template.recurrence)))
   const savesTemplate = recurring && !sameAsTemplate
-  const extraTaskClock = schedule.deadline || schedule.times[0]
+  const firstDeadline = firstSlotDeadline(schedule)
+  const extraTaskClock = firstDeadline || schedule.times[0]
   // same rule as the scheduler: a deadline earlier than the trigger time means the next day
-  const extraTaskNextDay = !!schedule.deadline && !!schedule.times[0] && schedule.deadline < schedule.times[0]
+  const extraTaskNextDay = !!firstDeadline && !!schedule.times[0] && firstDeadline < schedule.times[0]
 
   const pickTemplate = (t: TaskTemplate | null) => {
     if (!t) {

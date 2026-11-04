@@ -137,6 +137,9 @@ export default function Home() {
     stock: 'stock',
     note: 'note',
   }
+  // SCRUM-10: the tiles above raise a new ad-hoc task, which staff may not do
+  const canCreate = profile?.role !== 'staff'
+  const tiles = canCreate ? grid : grid.filter((g) => !tileCategories[g.id])
 
   const openOp = (id: string) => {
     if (id === 'temp') return navigate('/staff/temp')
@@ -206,7 +209,7 @@ export default function Home() {
 
       <div className="mb-2.5 text-[13px] font-bold">All operations</div>
       <div className="grid grid-cols-3 gap-2.5">
-        {grid.map((g) => (
+        {tiles.map((g) => (
           <button
             key={g.id}
             onClick={() => openOp(g.id)}
