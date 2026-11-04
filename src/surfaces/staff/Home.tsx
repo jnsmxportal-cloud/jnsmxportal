@@ -151,7 +151,13 @@ export default function Home() {
   )
 
   const openOp = (id: string) => {
-    if (id === 'temp') return navigate('/staff/temp')
+    if (id === 'temp') {
+      // the scheduled log (with its QR / photo rules) comes first; an ad-hoc log only when none is open
+      const pending = (myTasks ?? [])
+        .filter((t) => t.is_temperature_log && ['assigned', 'in_progress', 'rejected'].includes(t.status))
+        .sort((a, b) => (a.due_at ?? '9').localeCompare(b.due_at ?? '9'))[0]
+      return navigate(pending ? `/staff/temp/${pending.id}` : '/staff/temp')
+    }
     if (id === 'delivery') return navigate('/staff/delivery')
     if (id === 'incident') return navigate('/staff/incident')
     if (id === 'invoice') return navigate('/staff/invoice')

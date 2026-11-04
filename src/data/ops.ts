@@ -72,6 +72,8 @@ export interface TempLogArgs {
   geofenceVerdict: string
   /** camera photo of each unit's display, keyed by unit id (Blobs survive the Dexie queue) */
   photos?: Record<string, Blob>
+  /** QR label scanned at each unit (payload), keyed by unit id — set on QR-gated tasks */
+  qrScans?: Record<string, string>
   /** device fix at capture time, stamped onto the photo evidence rows */
   geo?: { lat?: number; lng?: number; accuracy?: number }
 }
@@ -126,6 +128,7 @@ export async function submitTempLogCore(uid: string, args: TempLogArgs, deviceTs
         value: r.value,
         breach: r.value > r.unit.breach_above,
         photo: !!args.photos?.[r.unit.id],
+        qr: !!args.qrScans?.[r.unit.id],
       },
       uploader: uid,
       device_ts: ts,
@@ -133,6 +136,22 @@ export async function submitTempLogCore(uid: string, args: TempLogArgs, deviceTs
     })),
   )
   if (evidenceError) throw evidenceError
+  // QR-gated log: one 'qr' row per unit proves the reading was taken at that unit
+  const qrRows = args.readings
+    .filter((r) => args.qrScans?.[r.unit.id])
+    .map((r) => ({
+      org_id: ORG_ID,
+      instance_id: instanceId,
+      type: 'qr',
+      metadata: { payload: args.qrScans![r.unit.id], unit: r.unit.name, unit_id: r.unit.id },
+      uploader: uid,
+      device_ts: ts,
+      geofence_verdict: args.geofenceVerdict,
+    }))
+  if (qrRows.length) {
+    const { error: qrError } = await supabase.from('evidence').insert(qrRows)
+    if (qrError) throw qrError
+  }
   // one photo of each unit's display, linked to the reading by unit id
   let photoCount = 0
   for (const r of args.readings) {
@@ -392,15 +411,66 @@ export interface QueuedOp {
   last_error?: string
 }
 
+/** An in-progress temperature log, kept on the device until it is submitted. */
+export interface TempLogDraft {
+  /** `temp:<instanceId>` or `temp:adhoc:<storeId>` */
+  key: string
+  vals: Record<string, number>
+  scans: Record<string, string>
+  photos: Record<string, Blob>
+  updated_at: string
+}
+
 class OpsDB extends Dexie {
   queue!: Table<QueuedOp, number>
+  drafts!: Table<TempLogDraft, string>
   constructor() {
     super('ops-offline')
     this.version(1).stores({ queue: '++id, kind' })
+    this.version(2).stores({ queue: '++id, kind', drafts: 'key' })
   }
 }
 
 export const offlineDb = new OpsDB()
+
+// ---------- temp-log drafts ----------
+// A trip to the camera app can get the PWA discarded by the OS; the draft brings the staff
+// member back to exactly where they were instead of making them re-enter every reading.
+const DRAFT_TTL_MS = 12 * 3600_000
+
+export function tempDraftKey(instanceId: string | null, storeId: string): string {
+  return instanceId ? `temp:${instanceId}` : `temp:adhoc:${storeId}`
+}
+
+export async function loadTempDraft(key: string): Promise<TempLogDraft | undefined> {
+  try {
+    const d = await offlineDb.drafts.get(key)
+    if (!d) return undefined
+    if (Date.now() - new Date(d.updated_at).getTime() > DRAFT_TTL_MS) {
+      await offlineDb.drafts.delete(key)
+      return undefined
+    }
+    return d
+  } catch {
+    return undefined
+  }
+}
+
+export async function saveTempDraft(d: TempLogDraft): Promise<void> {
+  try {
+    await offlineDb.drafts.put(d)
+  } catch (e) {
+    console.warn('temp-log draft not saved —', e)
+  }
+}
+
+export async function clearTempDraft(key: string): Promise<void> {
+  try {
+    await offlineDb.drafts.delete(key)
+  } catch {
+    /* nothing to clear */
+  }
+}
 
 export async function enqueueOp(
   uid: string,

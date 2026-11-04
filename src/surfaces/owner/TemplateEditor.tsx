@@ -278,6 +278,7 @@ export default function TemplateEditor({
               Staff record a reading for every chiller and freezer in the store's unit registry (Admin → Units)
               instead of ticking checklist items. Breaches above a unit's threshold escalate automatically.
               {evidence.photo && ' Photo evidence is on, so staff must photograph every unit’s display before they can submit.'}
+              {evidence.qr && ' QR is on, so each unit’s reading is unlocked only by scanning that unit’s own QR label (Admin → Units), in order — nothing can be skipped.'}
               {items.length > 0 && ' Existing checklist items will be dropped when you save.'}
             </div>
           ) : (

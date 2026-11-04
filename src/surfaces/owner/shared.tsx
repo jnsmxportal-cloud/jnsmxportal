@@ -168,15 +168,17 @@ export function EvidenceGallery({ instanceId }: { instanceId: string }) {
         )
       })}
       {qrs.map((e) => {
-        const payload = ((e.metadata ?? {}) as { payload?: string }).payload
+        const m = (e.metadata ?? {}) as { payload?: string; unit?: string }
         return (
           <span
             key={e.id}
-            title={payload}
+            title={m.payload}
             className="flex max-w-[220px] items-center gap-1.5 rounded-[9px] bg-info-soft px-2.5 py-[7px] text-[11.5px] font-semibold text-[#2563EB]"
           >
-            <QrCode size={13} weight="fill" /> QR verified
-            {payload && <span className="truncate font-mono text-[10px] font-normal">{payload}</span>}
+            <QrCode size={13} weight="fill" /> {m.unit ? `${m.unit} · QR verified` : 'QR verified'}
+            {!m.unit && m.payload && (
+              <span className="truncate font-mono text-[10px] font-normal">{m.payload}</span>
+            )}
           </span>
         )
       })}

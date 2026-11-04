@@ -5,6 +5,7 @@ import {
   ArrowsClockwise,
   Check,
   Crosshair,
+  DownloadSimple,
   ListChecks,
   MapPin,
   Password,
@@ -43,9 +44,11 @@ import TemplateEditor from './TemplateEditor'
 import CategoriesPanel from './CategoriesPanel'
 import TasksPanel from './TasksPanel'
 import RolesPanel from './RolesPanel'
+import UnitQrModal, { printQrLabel } from './UnitQrModal'
 import { baseLabel, useRoles } from '../../data/roles'
+import { qrFileName, unitQrPayload, zoneQrPayload } from '../../lib/qr'
 import { categoryMeta, useCategories } from '../../data/categories'
-import type { AppRole, Profile, Store, TaskInstance } from '../../lib/types'
+import type { AppRole, Profile, Store, StoreUnit, TaskInstance } from '../../lib/types'
 
 const tabs = ['Templates', 'Tasks', 'Categories', 'Users', 'Roles', 'Units', 'QR codes', 'Geofence'] as const
 type Tab = (typeof tabs)[number]
@@ -544,8 +547,15 @@ function UnitsPanel() {
   const delUnit = useDeleteUnit()
   const toast = useToast()
   const onErr = { onError: (e: Error) => toast(e.message, 'error') }
+  const [qrUnit, setQrUnit] = useState<StoreUnit | null>(null)
 
   return (
+    <div>
+    <div className="mb-3.5 text-[12.5px] text-muted">
+      The chillers and freezers of each store, in the order staff read them. Every unit has its own QR
+      label (<QrIcon size={12} className="inline" />) to print and stick on it — QR-gated temperature
+      logs unlock a unit only after its label is scanned.
+    </div>
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
       {stores.map((s) => (
         <Card key={s.id} className="p-4">
@@ -590,6 +600,14 @@ function UnitsPanel() {
                       <option value="chiller">chiller</option>
                       <option value="freezer">freezer</option>
                     </select>
+                    <button
+                      onClick={() => setQrUnit(u)}
+                      title="QR label — view, download or print"
+                      aria-label={`QR label for ${u.name}`}
+                      className="p-0.5 text-slate hover:text-brand"
+                    >
+                      <QrIcon size={14} />
+                    </button>
                     <button onClick={() => delUnit.mutate(u.id, onErr)} className="p-0.5 text-danger"><Trash size={13} /></button>
                   </div>
                   <div className="flex items-center gap-2 text-[10.5px] text-muted">
@@ -615,28 +633,55 @@ function UnitsPanel() {
         </Card>
       ))}
     </div>
+    {qrUnit && (
+      <UnitQrModal
+        unit={qrUnit}
+        storeName={stores.find((s) => s.id === qrUnit.store_id)?.name ?? ''}
+        onClose={() => setQrUnit(null)}
+      />
+    )}
+    </div>
   )
 }
 
 // ================= QR codes =================
+interface QrCard {
+  store: Store
+  label: string
+  sub: string
+  dataUrl: string
+  file: string
+}
+
 function QrPanel() {
   const { stores } = useAuth()
   const { data: units } = useStoreUnits()
-  const [codes, setCodes] = useState<{ store: Store; zone: string; dataUrl: string }[]>([])
+  const [codes, setCodes] = useState<QrCard[]>([])
 
   useEffect(() => {
     let live = true
     ;(async () => {
-      const out: { store: Store; zone: string; dataUrl: string }[] = []
+      const out: QrCard[] = []
       for (const s of stores) {
-        const zones = [
-          ...(units ?? []).filter((u) => u.store_id === s.id).map((u) => u.name),
-          'Stockroom',
-          'Freezer aisle',
-        ]
-        for (const zone of zones) {
-          const payload = `storeops:asset:${s.id}:${zone}`
-          out.push({ store: s, zone, dataUrl: await QRCode.toDataURL(payload, { width: 220, margin: 1 }) })
+        // one label per chiller/freezer, keyed by the unit's id so renaming never orphans a sticker
+        for (const u of (units ?? []).filter((x) => x.store_id === s.id)) {
+          out.push({
+            store: s,
+            label: u.name,
+            sub: `${u.type === 'freezer' ? 'Freezer' : 'Chiller'} · ${s.name}`,
+            dataUrl: await QRCode.toDataURL(unitQrPayload(s.id, u.id), { width: 512, margin: 2 }),
+            file: qrFileName(s.name, u.name),
+          })
+        }
+        // zone labels for "QR required" checklist items
+        for (const zone of ['Stockroom', 'Freezer aisle']) {
+          out.push({
+            store: s,
+            label: zone,
+            sub: `Zone · ${s.name}`,
+            dataUrl: await QRCode.toDataURL(zoneQrPayload(s.id, zone), { width: 512, margin: 2 }),
+            file: qrFileName(s.name, zone),
+          })
         }
       }
       if (live) setCodes(out)
@@ -648,26 +693,49 @@ function QrPanel() {
 
   return (
     <div>
-      <div className="mb-3.5 flex items-center justify-between print:hidden">
+      <div className="mb-3.5 flex items-center justify-between gap-3 print:hidden">
         <div className="text-[12.5px] text-muted">
-          Stick each code on its asset — “QR required” checklist items can only be completed by
-          scanning the right code (FR-4.3).
+          One label per chiller/freezer (from Admin → Units) and per zone. Stick each on its asset:
+          QR-gated temperature logs unlock a unit only after its label is scanned, and “QR required”
+          checklist items need the zone label.
         </div>
         <button
           onClick={() => window.print()}
-          className="flex items-center gap-1.5 rounded-[10px] bg-ink px-3.5 py-2 text-xs font-semibold text-white"
+          className="flex flex-none items-center gap-1.5 rounded-[10px] bg-ink px-3.5 py-2 text-xs font-semibold text-white"
         >
           <Printer size={13} /> Print sheet
         </button>
       </div>
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4">
-        {codes.map((c, i) => (
-          <Card key={i} className="flex flex-col items-center p-4 text-center">
-            <img src={c.dataUrl} alt={`QR for ${c.zone}`} className="mb-2 w-full max-w-[160px]" />
-            <div className="text-[12.5px] font-bold">{c.zone}</div>
-            <div className="text-[10.5px] text-muted">{c.store.name}</div>
+        {codes.map((c) => (
+          <Card key={`${c.store.id}:${c.label}`} className="flex flex-col items-center p-4 text-center">
+            <img src={c.dataUrl} alt={`QR for ${c.label}`} className="mb-2 w-full max-w-[160px]" />
+            <div className="text-[12.5px] font-bold">{c.label}</div>
+            <div className="text-[10.5px] text-muted">{c.sub}</div>
+            <div className="mt-2.5 flex gap-1.5 print:hidden">
+              <a
+                href={c.dataUrl}
+                download={c.file}
+                title="Download PNG"
+                className="flex items-center gap-1 rounded-lg border border-ink/15 px-2 py-1 text-[11px] font-semibold text-slate"
+              >
+                <DownloadSimple size={12} weight="bold" /> PNG
+              </a>
+              <button
+                onClick={() => printQrLabel(c.dataUrl, c.label, c.sub)}
+                title="Print this label"
+                className="flex items-center gap-1 rounded-lg border border-ink/15 px-2 py-1 text-[11px] font-semibold text-slate"
+              >
+                <Printer size={12} weight="bold" /> Print
+              </button>
+            </div>
           </Card>
         ))}
+        {codes.length === 0 && (
+          <div className="col-span-full p-8 text-center text-xs text-muted">
+            Add chillers and freezers under Admin → Units to generate their labels.
+          </div>
+        )}
       </div>
     </div>
   )
