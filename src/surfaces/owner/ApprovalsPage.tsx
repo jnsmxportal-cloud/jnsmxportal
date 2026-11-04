@@ -1,15 +1,19 @@
+import { useState } from 'react'
 import { CheckCircle } from '@phosphor-icons/react'
 import { Card, PrioBadge } from '../../components/ui'
 import { useTasks } from '../../data/hooks'
+import type { TaskInstance } from '../../lib/types'
 import { timeAgo } from '../../lib/format'
 import { useOwnerCtx } from './OwnerLayout'
 import { ApprovalActions, EvidenceGallery, evidenceSummary, useKindMeta, useNames } from './shared'
+import { TaskDetailModal } from './TaskDetailModal'
 
 export default function ApprovalsPage() {
   const { storeId } = useOwnerCtx()
   const { data: tasks } = useTasks({ storeId })
   const { userName, storeName } = useNames()
   const kind = useKindMeta()
+  const [open, setOpen] = useState<TaskInstance | null>(null)
   const queue = (tasks ?? []).filter((t) => t.status === 'submitted')
 
   if (queue.length === 0)
@@ -35,7 +39,13 @@ export default function ApprovalsPage() {
             </div>
             <div className="min-w-0 flex-1">
               <div className="mb-0.5 flex items-center gap-2">
-                <span className="font-display text-[15px] font-bold">{t.title}</span>
+                <button
+                  onClick={() => setOpen(t)}
+                  title="Open the full task: checklist results, every piece of evidence, and actions"
+                  className="font-display text-[15px] font-bold hover:text-brand"
+                >
+                  {t.title}
+                </button>
                 <PrioBadge p={t.priority} />
               </div>
               <div className="mb-2.5 text-xs text-muted">
@@ -51,6 +61,7 @@ export default function ApprovalsPage() {
           </Card>
         )
       })}
+      {open && <TaskDetailModal task={open} onClose={() => setOpen(null)} />}
     </div>
   )
 }

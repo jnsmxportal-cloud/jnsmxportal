@@ -1,10 +1,12 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { isToday } from 'date-fns'
 import {
   ChartBar,
   CheckCircle,
   ClockCountdown,
   ListBullets,
+  MagnifyingGlass,
   SealCheck,
   ShieldCheck,
   Truck,
@@ -15,14 +17,20 @@ import {
 import { Card, SectionHead, StatusChip, deliveryStatusStyle } from '../../components/ui'
 import { useAuth } from '../../auth/AuthProvider'
 import { useDeliveries, useEscalations, useProfiles, useTasks } from '../../data/hooks'
+import type { TaskInstance } from '../../lib/types'
 import { dueLabel, timeAgo } from '../../lib/format'
 import { useOwnerCtx } from './OwnerLayout'
 import { ApprovalCard, storeCompliance, useNames } from './shared'
 import { isOnline, useUserStoreRoles } from '../../data/ownerExtras'
+import { TaskDetailModal, TaskListModal } from './TaskDetailModal'
 
 export default function Dashboard() {
   const { storeId } = useOwnerCtx()
   const { stores } = useAuth()
+  const navigate = useNavigate()
+  // look-ups: a KPI tile opens its list of tasks; a row anywhere opens the task itself
+  const [list, setList] = useState<{ title: string; sub?: string; tasks: TaskInstance[] } | null>(null)
+  const [open, setOpen] = useState<TaskInstance | null>(null)
   const { data: allTasks } = useTasks({ storeId: 'all' })
   const { data: deliveries } = useDeliveries(storeId)
   const { data: escalations } = useEscalations(storeId)
@@ -36,9 +44,7 @@ export default function Dashboard() {
   )
 
   const active = tasks.filter((t) => ['assigned', 'in_progress', 'rejected'].includes(t.status))
-  const completedToday = tasks.filter(
-    (t) => t.completed_at && isToday(new Date(t.completed_at)),
-  ).length
+  const completedToday = tasks.filter((t) => t.completed_at && isToday(new Date(t.completed_at)))
   const pendingReview = tasks.filter((t) => t.status === 'submitted')
   const overdue = tasks.filter(
     (t) =>
@@ -56,12 +62,61 @@ export default function Dashboard() {
             visibleStores.length,
         )
 
-  const kpis = [
-    { label: 'Active tasks', value: active.length, Icon: ListBullets, c: '#3B82F6', b: '#EAF1FE' },
-    { label: 'Completed today', value: completedToday, Icon: CheckCircle, c: '#16B364', b: '#E7F7EF' },
-    { label: 'Pending review', value: pendingReview.length, Icon: SealCheck, c: '#F59E0B', b: '#FEF3E2' },
-    { label: 'Overdue', value: overdue.length, Icon: ClockCountdown, c: '#E5484D', b: '#FCEBEC' },
-    { label: 'Compliance', value: `${compliance}%`, Icon: ShieldCheck, c: '#7C3AED', b: '#F1EBFC' },
+  const scopeLabel = storeId === 'all' ? 'all stores' : storeName(storeId)
+  const kpis: {
+    label: string
+    value: number | string
+    Icon: typeof ListBullets
+    c: string
+    b: string
+    onLook: () => void
+    hint: string
+  }[] = [
+    {
+      label: 'Active tasks',
+      value: active.length,
+      Icon: ListBullets,
+      c: '#3B82F6',
+      b: '#EAF1FE',
+      hint: 'Open, in-progress and returned tasks',
+      onLook: () => setList({ title: 'Active tasks', sub: scopeLabel, tasks: active }),
+    },
+    {
+      label: 'Completed today',
+      value: completedToday.length,
+      Icon: CheckCircle,
+      c: '#16B364',
+      b: '#E7F7EF',
+      hint: 'Tasks completed or approved today',
+      onLook: () => setList({ title: 'Completed today', sub: scopeLabel, tasks: completedToday }),
+    },
+    {
+      label: 'Pending review',
+      value: pendingReview.length,
+      Icon: SealCheck,
+      c: '#F59E0B',
+      b: '#FEF3E2',
+      hint: 'Submitted tasks waiting for a verdict',
+      onLook: () => setList({ title: 'Pending review', sub: scopeLabel, tasks: pendingReview }),
+    },
+    {
+      label: 'Overdue',
+      value: overdue.length,
+      Icon: ClockCountdown,
+      c: '#E5484D',
+      b: '#FCEBEC',
+      hint: 'Past their due time or missed the cutoff',
+      onLook: () => setList({ title: 'Overdue & missed', sub: scopeLabel, tasks: overdue }),
+    },
+    {
+      label: 'Compliance',
+      value: `${compliance}%`,
+      Icon: ShieldCheck,
+      c: '#7C3AED',
+      b: '#F1EBFC',
+      hint: 'Open the Reports page',
+      onLook: () => navigate('/owner/reports'),
+    },
   ]
 
   const onlineStaff = (profiles ?? []).filter(isOnline)
@@ -76,7 +131,12 @@ export default function Dashboard() {
       {/* KPI row */}
       <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:gap-4 xl:grid-cols-5">
         {kpis.map((k) => (
-          <Card key={k.label} className="relative overflow-hidden p-[18px]">
+          <button
+            key={k.label}
+            onClick={k.onLook}
+            title={k.hint}
+            className="group relative overflow-hidden rounded-2xl border border-line bg-white p-[18px] text-left transition hover:border-brand/40 hover:shadow-[0_8px_24px_rgba(15,20,32,.08)]"
+          >
             <div className="absolute bottom-0 left-0 top-0 w-1" style={{ background: k.c }} />
             <div className="mb-3 flex items-center justify-between">
               <div
@@ -85,12 +145,15 @@ export default function Dashboard() {
               >
                 <k.Icon size={19} weight="fill" color={k.c} />
               </div>
+              <span className="flex items-center gap-1 text-[10.5px] font-semibold text-muted group-hover:text-brand">
+                <MagnifyingGlass size={12} weight="bold" /> Look up
+              </span>
             </div>
             <div className="font-display text-[32px] font-bold leading-none tracking-tight">
               {k.value}
             </div>
             <div className="mt-1.5 text-xs font-medium text-muted">{k.label}</div>
-          </Card>
+          </button>
         ))}
       </div>
 
@@ -220,16 +283,20 @@ export default function Dashboard() {
               </span>
             </div>
             {overdue.map((o) => (
-              <div key={o.id} className="flex items-center gap-3 border-b border-ink/5 px-[17px] py-3">
+              <button
+                key={o.id}
+                onClick={() => setOpen(o)}
+                className="flex w-full items-center gap-3 border-b border-ink/5 px-[17px] py-3 text-left transition hover:bg-canvas"
+              >
                 <span className="h-2 w-2 flex-none rounded-full bg-danger" />
-                <div className="flex-1">
-                  <div className="text-[13px] font-semibold">{o.title}</div>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[13px] font-semibold">{o.title}</div>
                   <div className="text-[11px] text-muted">
                     {storeName(o.store_id)} · {o.assigned_to ? userName(o.assigned_to) : 'Unassigned'}
                   </div>
                 </div>
                 <span className="text-[11.5px] font-semibold text-danger">{dueLabel(o).text}</span>
-              </div>
+              </button>
             ))}
             {overdue.length === 0 && (
               <div className="p-8 text-center text-xs text-muted">Nothing overdue. 🎉</div>
@@ -256,7 +323,19 @@ export default function Dashboard() {
                 <div className="mt-2 text-[12.5px]">All caught up — nothing to approve.</div>
               </div>
             ) : (
-              pendingReview.slice(0, 4).map((t) => <ApprovalCard key={t.id} task={t} />)
+              pendingReview.slice(0, 4).map((t) => (
+                <ApprovalCard key={t.id} task={t} onOpen={() => setOpen(t)} />
+              ))
+            )}
+            {pendingReview.length > 4 && (
+              <button
+                onClick={() =>
+                  setList({ title: 'Pending review', sub: scopeLabel, tasks: pendingReview })
+                }
+                className="w-full px-[17px] py-3 text-center text-[12px] font-semibold text-brand hover:bg-canvas"
+              >
+                View all {pendingReview.length} awaiting review →
+              </button>
             )}
           </Card>
 
@@ -328,6 +407,9 @@ export default function Dashboard() {
           </Card>
         </div>
       </div>
+
+      {list && <TaskListModal {...list} onClose={() => setList(null)} />}
+      {open && <TaskDetailModal task={open} onClose={() => setOpen(null)} />}
     </div>
   )
 }

@@ -72,6 +72,19 @@ export function storeCompliance(tasks: TaskInstance[], storeId: string): number 
   return complianceStats(tasks.filter((t) => t.store_id === storeId)).pct
 }
 
+/** Label + colours for every task status (Tasks admin, dashboard look-ups, task detail). */
+export const taskStatusStyle: Record<string, { label: string; c: string; b: string }> = {
+  scheduled: { label: 'Scheduled', c: '#3B82F6', b: '#EAF1FE' },
+  assigned: { label: 'Open', c: '#3B82F6', b: '#EAF1FE' },
+  in_progress: { label: 'In progress', c: '#3B82F6', b: '#EAF1FE' },
+  submitted: { label: 'Needs review', c: '#E8481F', b: '#FFF6F2' },
+  rejected: { label: 'Rejected · redo', c: '#B45309', b: '#FEF3E2' },
+  approved: { label: 'Completed', c: '#0E9152', b: '#E7F7EF' },
+  completed: { label: 'Completed', c: '#0E9152', b: '#E7F7EF' },
+  missed: { label: 'Missed', c: '#E5484D', b: '#FCEBEC' },
+  cancelled: { label: 'Cancelled', c: '#5B6478', b: '#F0F1F4' },
+}
+
 export function EvidencePhoto({ ev }: { ev: EvidenceRow }) {
   const { data: url } = useQuery({
     queryKey: ['evidence-url', ev.storage_path],
@@ -239,7 +252,16 @@ export function FeedbackModal({
   )
 }
 
-export function ApprovalActions({ task, compact }: { task: TaskInstance; compact?: boolean }) {
+export function ApprovalActions({
+  task,
+  compact,
+  onDone,
+}: {
+  task: TaskInstance
+  compact?: boolean
+  /** called after a verdict is saved (e.g. to close the surrounding detail view) */
+  onDone?: () => void
+}) {
   const review = useReviewTask()
   const toast = useToast()
   const [modal, setModal] = useState<'rejected' | 'reopened' | null>(null)
@@ -255,6 +277,7 @@ export function ApprovalActions({ task, compact }: { task: TaskInstance; compact
             toast('Rejected · returned to staff with feedback', 'error')
           else toast('Reopened · re-assigned instantly with feedback', 'warn')
           setModal(null)
+          onDone?.()
         },
         onError: (e) => toast(e.message, 'error'),
       },
@@ -301,12 +324,16 @@ export function ApprovalActions({ task, compact }: { task: TaskInstance; compact
   )
 }
 
-export function ApprovalCard({ task }: { task: TaskInstance }) {
+export function ApprovalCard({ task, onOpen }: { task: TaskInstance; onOpen?: () => void }) {
   const { Icon, c, b } = useKindMeta()(task)
   const { userName, storeName } = useNames()
+  const Head = onOpen ? 'button' : 'div'
   return (
     <div className="border-b border-ink/5 px-[17px] py-3.5">
-      <div className="mb-2 flex items-start gap-2.5">
+      <Head
+        onClick={onOpen}
+        className={`mb-2 flex w-full items-start gap-2.5 text-left ${onOpen ? 'group' : ''}`}
+      >
         <div
           className="flex h-[30px] w-[30px] flex-none items-center justify-center rounded-[9px]"
           style={{ background: b }}
@@ -314,18 +341,22 @@ export function ApprovalCard({ task }: { task: TaskInstance }) {
           <Icon size={15} weight="fill" color={c} />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="text-[12.5px] font-semibold leading-tight">{task.title}</div>
+          <div className="text-[12.5px] font-semibold leading-tight group-hover:text-brand">{task.title}</div>
           <div className="mt-px text-[11px] text-muted">
             {storeName(task.store_id)} · {userName(task.submitted_by)} ·{' '}
             {task.submitted_at ? timeAgo(task.submitted_at) : ''}
           </div>
         </div>
         <PrioBadge p={task.priority} />
-      </div>
-      <div className="mb-2 flex items-center gap-1.5 rounded-[9px] bg-canvas px-2.5 py-[7px] text-[11.5px] text-slate">
+      </Head>
+      <Head
+        onClick={onOpen}
+        className="mb-2 flex w-full items-center gap-1.5 rounded-[9px] bg-canvas px-2.5 py-[7px] text-left text-[11.5px] text-slate"
+      >
         <Paperclip size={12} />
-        {evidenceSummary(task)}
-      </div>
+        <span className="flex-1">{evidenceSummary(task)}</span>
+        {onOpen && <span className="font-semibold text-brand">View evidence →</span>}
+      </Head>
       <ApprovalActions task={task} compact />
     </div>
   )

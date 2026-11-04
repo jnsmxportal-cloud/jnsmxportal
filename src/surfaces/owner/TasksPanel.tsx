@@ -20,7 +20,7 @@ import { useTemplates, useUserStoreRoles } from '../../data/admin'
 import { isOpenStatus, useDeleteTask, useSetTaskStatus, useUpdateTask } from '../../data/taskAdmin'
 import { dueLabel, timeAgo } from '../../lib/format'
 import type { TaskInstance, TaskPriority } from '../../lib/types'
-import { useKindMeta, useNames } from './shared'
+import { taskStatusStyle as statusStyle, useKindMeta, useNames } from './shared'
 
 /**
  * Admin → Tasks: every task instance in the org (scheduler-generated, one-off, Run now and
@@ -62,18 +62,6 @@ function inGroup(t: TaskInstance, g: StatusGroup): boolean {
     default:
       return true
   }
-}
-
-const statusStyle: Record<string, { label: string; c: string; b: string }> = {
-  scheduled: { label: 'Scheduled', c: '#3B82F6', b: '#EAF1FE' },
-  assigned: { label: 'Open', c: '#3B82F6', b: '#EAF1FE' },
-  in_progress: { label: 'In progress', c: '#3B82F6', b: '#EAF1FE' },
-  submitted: { label: 'Needs review', c: '#E8481F', b: '#FFF6F2' },
-  rejected: { label: 'Rejected · redo', c: '#B45309', b: '#FEF3E2' },
-  approved: { label: 'Completed', c: '#0E9152', b: '#E7F7EF' },
-  completed: { label: 'Completed', c: '#0E9152', b: '#E7F7EF' },
-  missed: { label: 'Missed', c: '#E5484D', b: '#FCEBEC' },
-  cancelled: { label: 'Cancelled', c: '#5B6478', b: '#F0F1F4' },
 }
 
 /** ISO → the local 'YYYY-MM-DDTHH:MM' the DateTimeField edits */
@@ -376,10 +364,10 @@ function TaskEditModal({ task, onClose }: { task: TaskInstance; onClose: () => v
   }
 
   return (
-    <div onClick={onClose} className="fixed inset-0 z-[80] flex items-center justify-center bg-navy/50 p-6">
+    <div onClick={onClose} className="fixed inset-0 z-[80] flex items-center justify-center bg-navy/50 p-3 sm:p-6">
       <div
         onClick={(e) => e.stopPropagation()}
-        className="flex max-h-[92vh] w-[520px] max-w-full animate-fade flex-col overflow-hidden rounded-[20px] bg-white shadow-[0_30px_80px_rgba(0,0,0,.3)]"
+        className="flex max-h-[92dvh] w-[520px] max-w-full animate-fade flex-col overflow-hidden rounded-[20px] bg-white shadow-[0_30px_80px_rgba(0,0,0,.3)]"
       >
         <div className="flex items-center justify-between border-b border-line px-6 py-4">
           <div>
@@ -461,7 +449,7 @@ function DeleteTaskModal({ task, onClose }: { task: TaskInstance; onClose: () =>
   const { storeName } = useNames()
   const open = isOpenStatus(task.status)
   return (
-    <div onClick={onClose} className="fixed inset-0 z-[80] flex items-center justify-center bg-navy/50 p-6">
+    <div onClick={onClose} className="fixed inset-0 z-[80] flex items-center justify-center bg-navy/50 p-3 sm:p-6">
       <div
         onClick={(e) => e.stopPropagation()}
         className="w-[440px] max-w-full animate-fade rounded-[20px] bg-white p-6 shadow-[0_30px_80px_rgba(0,0,0,.3)]"

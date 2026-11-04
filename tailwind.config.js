@@ -62,7 +62,10 @@ export default {
       },
       animation: {
         pop: 'pop .5s cubic-bezier(.2,.8,.3,1.2) both',
-        fade: 'fadeUp .34s cubic-bezier(.2,.7,.3,1) both',
+        // `backwards`, not `both`: the end keyframe equals the natural style, and a lingering
+        // `transform` would turn every page/card into the containing block of its `fixed`
+        // modals (they then centre on the scrolled page content, not the viewport).
+        fade: 'fadeUp .34s cubic-bezier(.2,.7,.3,1) backwards',
         toast: 'toastIn .3s ease both',
         pulsedot: 'pulseDot 1.8s infinite',
         ring: 'ring 2.4s ease-out infinite',
