@@ -26,6 +26,7 @@ import { useStaffStore } from './StaffShell'
 import { useToast } from '../../components/Toast'
 import { useThreads } from '../../data/messages'
 import type { TaskInstance } from '../../lib/types'
+import type { PermissionKey } from '../../data/roles'
 
 const grid: { id: string; label: string; Icon: Icon; c: string; b: string }[] = [
   { id: 'delivery', label: 'Delivery Received', Icon: Package, c: '#3B82F6', b: '#EAF1FE' },
@@ -117,7 +118,7 @@ function InboxButton() {
 }
 
 export default function Home() {
-  const { profile } = useAuth()
+  const { profile, can } = useAuth()
   const store = useStaffStore()
   const navigate = useNavigate()
   const toast = useToast()
@@ -137,9 +138,17 @@ export default function Home() {
     stock: 'stock',
     note: 'note',
   }
-  // SCRUM-10: the tiles above raise a new ad-hoc task, which staff may not do
-  const canCreate = profile?.role !== 'staff'
-  const tiles = canCreate ? grid : grid.filter((g) => !tileCategories[g.id])
+  // tiles follow the member's rights: the category tiles raise a new ad-hoc task (SCRUM-10),
+  // the operation tiles each have their own right
+  const tilePerm: Record<string, PermissionKey> = {
+    delivery: 'deliveries.log',
+    temp: 'temp.log',
+    incident: 'incidents.report',
+    invoice: 'invoices.upload',
+  }
+  const tiles = grid.filter((g) =>
+    tilePerm[g.id] ? can(tilePerm[g.id]) : tileCategories[g.id] ? can('tasks.create') : true,
+  )
 
   const openOp = (id: string) => {
     if (id === 'temp') return navigate('/staff/temp')
@@ -179,7 +188,7 @@ export default function Home() {
           <h2 className="text-[22px] font-extrabold tracking-tight">Store Operations</h2>
         </div>
         <div className="flex items-center gap-2.5">
-          <InboxButton />
+          {can('inbox.use') && <InboxButton />}
           <Avatar name={profile!.full_name} color={profile!.avatar_color} size={42} />
         </div>
       </div>

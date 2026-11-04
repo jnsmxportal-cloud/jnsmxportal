@@ -20,7 +20,7 @@ interface BeforeInstallPromptEvent extends Event {
 }
 
 export default function Profile() {
-  const { profile, signOut } = useAuth()
+  const { profile, role, signOut } = useAuth()
   const store = useStaffStore()
   const toast = useToast()
   const [installEvt, setInstallEvt] = useState<BeforeInstallPromptEvent | null>(null)
@@ -58,7 +58,7 @@ export default function Profile() {
         <div>
           <div className="text-base font-bold">{profile!.full_name}</div>
           <div className="text-xs text-muted">
-            {profile!.role === 'team_leader' ? 'Team Leader' : 'Staff'}
+            {role?.name ?? (profile!.role === 'team_leader' ? 'Team Leader' : 'Staff')}
             {store ? ` · ${store.name}${store.city ? `, ${store.city}` : ''}` : ''}
           </div>
         </div>

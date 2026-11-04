@@ -35,7 +35,10 @@ export interface Profile {
   id: string
   org_id: string
   full_name: string
+  /** base role = data access (RLS); derived from the chosen role's base by a trigger */
   role: AppRole
+  /** the admin-defined role (roles table) this member holds; null = the base role's built-in */
+  role_id: string | null
   avatar_color: string
   is_online: boolean
 }

@@ -13,6 +13,7 @@ import {
   Plus,
   Printer,
   QrCode as QrIcon,
+  ShieldCheck,
   Tag,
   Thermometer,
   Trash,
@@ -41,10 +42,12 @@ import { useToast } from '../../components/Toast'
 import TemplateEditor from './TemplateEditor'
 import CategoriesPanel from './CategoriesPanel'
 import TasksPanel from './TasksPanel'
+import RolesPanel from './RolesPanel'
+import { baseLabel, useRoles } from '../../data/roles'
 import { categoryMeta, useCategories } from '../../data/categories'
 import type { AppRole, Profile, Store, TaskInstance } from '../../lib/types'
 
-const tabs = ['Templates', 'Tasks', 'Categories', 'Users', 'Units', 'QR codes', 'Geofence'] as const
+const tabs = ['Templates', 'Tasks', 'Categories', 'Users', 'Roles', 'Units', 'QR codes', 'Geofence'] as const
 type Tab = (typeof tabs)[number]
 
 const roleLabels: Record<AppRole, string> = {
@@ -348,19 +351,28 @@ function UserModal({ user, onClose }: { user: Profile | null; onClose: () => voi
   const { stores } = useAuth()
   const { data: usr } = useUserStoreRoles()
   const admin = useAdminUsers()
+  const { data: roles } = useRoles()
   const toast = useToast()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('StoreOps!2026')
   const [name, setName] = useState(user?.full_name ?? '')
-  const [role, setRole] = useState<AppRole>(user?.role ?? 'staff')
+  const [roleId, setRoleId] = useState<string>(user?.role_id ?? '')
   const [storeIds, setStoreIds] = useState<string[]>(
     user ? (usr ?? []).filter((r) => r.user_id === user.id).map((r) => r.store_id) : [],
   )
+  // until a role is picked: the member's current built-in (or Staff for a new account)
+  const selectedRoleId =
+    roleId ||
+    (roles ?? []).find((r) => r.is_system && r.base_role === (user?.role ?? 'staff'))?.id ||
+    ''
+  const selectedRole = (roles ?? []).find((r) => r.id === selectedRoleId) ?? null
+  // base role travels too so an older edge function keeps working
+  const role: AppRole = selectedRole?.base_role ?? user?.role ?? 'staff'
 
   const submit = () => {
     const body = user
-      ? { action: 'update_user', user_id: user.id, role, full_name: name, store_ids: storeIds }
-      : { action: 'create_user', email, password, full_name: name, role, store_ids: storeIds }
+      ? { action: 'update_user', user_id: user.id, role, role_id: selectedRoleId || undefined, full_name: name, store_ids: storeIds }
+      : { action: 'create_user', email, password, full_name: name, role, role_id: selectedRoleId || undefined, store_ids: storeIds }
     admin.mutate(body, {
       onSuccess: () => {
         toast(user ? 'User updated' : `Account created for ${name}`)
@@ -391,11 +403,23 @@ function UserModal({ user, onClose }: { user: Profile | null; onClose: () => voi
         <label className={label}>Full name</label>
         <input value={name} onChange={(e) => setName(e.target.value)} className={`${inputCls} mb-3`} />
         <label className={label}>Role</label>
-        <select value={role} onChange={(e) => setRole(e.target.value as AppRole)} className={`${inputCls} mb-3`}>
-          {(Object.keys(roleLabels) as AppRole[]).map((r) => (
-            <option key={r} value={r}>{roleLabels[r]}</option>
-          ))}
-        </select>
+        {(roles ?? []).length > 0 ? (
+          <>
+            <select value={selectedRoleId} onChange={(e) => setRoleId(e.target.value)} className={inputCls}>
+              {(roles ?? []).map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                  {r.name !== baseLabel(r.base_role) ? ` · ${baseLabel(r.base_role)} access` : ''}
+                </option>
+              ))}
+            </select>
+            <div className="mb-3 mt-1 text-[11px] text-muted">
+              {selectedRole?.description ?? 'Roles and their rights are managed under the Roles tab.'}
+            </div>
+          </>
+        ) : (
+          <div className={`${inputCls} mb-3`}>{roleLabels[role]}</div>
+        )}
         <label className={label}>Stores</label>
         <div className="mb-4 flex flex-wrap gap-1.5">
           {stores.map((s) => {
@@ -428,6 +452,8 @@ function UserModal({ user, onClose }: { user: Profile | null; onClose: () => voi
 function UsersPanel() {
   const { data: profiles } = useProfiles()
   const { data: usr } = useUserStoreRoles()
+  const { data: roles } = useRoles()
+  const roleName = (p: Profile) => (roles ?? []).find((r) => r.id === p.role_id)?.name ?? roleLabels[p.role]
   const { stores, profile: me } = useAuth()
   const [modal, setModal] = useState<Profile | null | 'new'>(null)
   const isOwner = me?.role === 'owner'
@@ -467,7 +493,7 @@ function UsersPanel() {
                   />
                 </div>
                 <div className="text-[11.5px] text-muted">
-                  {roleLabels[p.role]}
+                  {roleName(p)}
                   {p.role === 'owner' ? ' · all stores' : myStores.length ? ` · ${myStores.join(', ')}` : ' · no store assigned'}
                 </div>
               </div>
@@ -843,6 +869,7 @@ const tabParams: Record<string, Tab> = {
   tasks: 'Tasks',
   categories: 'Categories',
   users: 'Users',
+  roles: 'Roles',
   units: 'Units',
   qr: 'QR codes',
   geofence: 'Geofence',
@@ -858,6 +885,7 @@ export default function AdminPage() {
     Tasks: ListChecks,
     Categories: Tag,
     Users: UsersIcon,
+    Roles: ShieldCheck,
     Units: Thermometer,
     'QR codes': QrIcon,
     Geofence: MapPin,
@@ -884,6 +912,7 @@ export default function AdminPage() {
       {tab === 'Tasks' && <TasksPanel />}
       {tab === 'Categories' && <CategoriesPanel />}
       {tab === 'Users' && <UsersPanel />}
+      {tab === 'Roles' && <RolesPanel />}
       {tab === 'Units' && <UnitsPanel />}
       {tab === 'QR codes' && <QrPanel />}
       {tab === 'Geofence' && <GeofencePanel />}

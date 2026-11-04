@@ -153,12 +153,12 @@ function InvoiceFolder({ storeId }: { storeId: string | 'all' }) {
 
 export default function DeliveriesPage() {
   const { storeId } = useOwnerCtx()
-  const { profile } = useAuth()
+  const { can } = useAuth()
   const { data: deliveries } = useDeliveries(storeId)
   const { userName, storeName } = useNames()
   const review = useReviewDelivery()
   const toast = useToast()
-  const canAct = profile!.role === 'owner' || profile!.role === 'remote_office'
+  const canAct = can('deliveries.verify')
   const [verifying, setVerifying] = useState<Delivery | null>(null)
 
   return (
@@ -209,7 +209,7 @@ export default function DeliveriesPage() {
                   <ClipboardText size={13} weight="fill" /> Review
                 </button>
               )}
-              {profile!.role === 'owner' && d.status === 'verified' && (
+              {can('deliveries.approve') && d.status === 'verified' && (
                 <>
                   <button
                     title="Approve — archive & stage for EPOS"

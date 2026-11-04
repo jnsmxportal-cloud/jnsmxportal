@@ -1,12 +1,25 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import { disablePushOnSignOut } from '../lib/push'
 import type { Profile, Store } from '../lib/types'
+import { effectivePermissions, type PermissionKey, type Role } from '../data/roles'
 
 interface AuthCtx {
   session: Session | null
   profile: Profile | null
+  /** the admin-defined role behind profile.role_id (or the base role's built-in) */
+  role: Role | null
+  /** feature permission check — the base role's data access still applies underneath */
+  can: (key: PermissionKey) => boolean
   stores: Store[]
   myStoreIds: string[]
   loading: boolean
@@ -15,12 +28,16 @@ interface AuthCtx {
   retry: () => void
   /** Re-read the store list (after an owner edits a geofence, or on a realtime change). */
   refreshStores: () => Promise<void>
+  /** Re-read roles (after the owner edits one in Admin → Roles). */
+  refreshRoles: () => Promise<void>
   signOut: () => Promise<void>
 }
 
 const Ctx = createContext<AuthCtx>({
   session: null,
   profile: null,
+  role: null,
+  can: () => false,
   stores: [],
   myStoreIds: [],
   loading: true,
@@ -28,12 +45,14 @@ const Ctx = createContext<AuthCtx>({
   profileMissing: false,
   retry: () => {},
   refreshStores: async () => {},
+  refreshRoles: async () => {},
   signOut: async () => {},
 })
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
+  const [roles, setRoles] = useState<Role[]>([])
   const [stores, setStores] = useState<Store[]>([])
   const [myStoreIds, setMyStoreIds] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
@@ -66,20 +85,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoadError(null)
       try {
         const uid = session.user.id
-        const [profRes, storesRes, usrRes] = await Promise.all([
+        const [profRes, storesRes, usrRes, rolesRes] = await Promise.all([
           supabase.from('profiles').select('*').eq('id', uid).maybeSingle(),
           supabase.from('stores').select('*').order('name'),
           supabase.from('user_store_roles').select('store_id').eq('user_id', uid),
+          supabase.from('roles').select('*'),
         ])
         if (cancelled) return
         if (profRes.error) throw profRes.error
         if (storesRes.error) throw storesRes.error
         if (usrRes.error) throw usrRes.error
+        // roles are additive: a missing table (pre-migration) must not block sign-in
+        if (rolesRes.error) console.warn('roles unavailable —', rolesRes.error.message)
         const prof = (profRes.data as Profile) ?? null
         const allStores = (storesRes.data as Store[]) ?? []
         setProfile(prof)
         setProfileMissing(!prof)
         setStores(allStores)
+        setRoles((rolesRes.data as Role[]) ?? [])
         const assigned = (usrRes.data ?? []).map((r: { store_id: string }) => r.store_id)
         setMyStoreIds(prof?.role === 'owner' ? allStores.map((s) => s.id) : assigned)
       } catch (e) {
@@ -134,6 +157,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [session?.user.id, profile?.id])
 
   // quiet re-read of stores — does NOT toggle `loading`, so the route tree stays mounted
+  const refreshRoles = useCallback(async () => {
+    const { data, error } = await supabase.from('roles').select('*')
+    if (!error) setRoles((data as Role[]) ?? [])
+  }, [])
+
+  // the member's role row: the one they hold, else the built-in for their base role
+  const role = useMemo<Role | null>(() => {
+    if (!profile) return null
+    return (
+      roles.find((r) => r.id === profile.role_id) ??
+      roles.find((r) => r.is_system && r.base_role === profile.role) ??
+      null
+    )
+  }, [roles, profile])
+  const permissions = useMemo(
+    () => (profile ? effectivePermissions(role, profile.role) : new Set<PermissionKey>()),
+    [role, profile],
+  )
+  const can = useCallback((key: PermissionKey) => permissions.has(key), [permissions])
+
   const refreshStores = useCallback(async () => {
     const { data, error } = await supabase.from('stores').select('*').order('name')
     if (error) {
@@ -179,6 +222,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         session,
         profile,
+        role,
+        can,
         stores,
         myStoreIds,
         loading,
@@ -186,6 +231,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         profileMissing,
         retry,
         refreshStores,
+        refreshRoles,
         signOut,
       }}
     >

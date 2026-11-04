@@ -164,7 +164,7 @@ function ShiftModal({
 
 export default function RotaPage() {
   const { storeId: ctxStore } = useOwnerCtx()
-  const { profile, stores } = useAuth()
+  const { profile, can, stores } = useAuth()
   const toast = useToast()
   const [localStore, setLocalStore] = useState<string>(stores[0]?.id ?? '')
   const storeId = ctxStore === 'all' ? localStore : ctxStore
@@ -178,7 +178,7 @@ export default function RotaPage() {
   const { data: profiles } = useProfiles()
   const { data: usr } = useUserStoreRoles()
   const copyWeek = useCopyLastWeek()
-  const canEdit = profile!.role === 'owner' || profile!.role === 'manager'
+  const canEdit = can('rota.manage')
 
   const [modal, setModal] = useState<ModalState | null>(null)
 

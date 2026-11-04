@@ -5,6 +5,7 @@ import {
   WarningOctagon,
 } from '@phosphor-icons/react'
 import { Card } from '../../components/ui'
+import { useAuth } from '../../auth/AuthProvider'
 import { useEscalations, useResolveEscalation } from '../../data/hooks'
 import { timeAgo } from '../../lib/format'
 import { useToast } from '../../components/Toast'
@@ -17,6 +18,8 @@ export default function EscalationsPage() {
   const { storeName } = useNames()
   const resolve = useResolveEscalation()
   const toast = useToast()
+  const { can } = useAuth()
+  const canResolve = can('escalations.resolve')
 
   if ((escalations ?? []).length === 0)
     return (
@@ -60,6 +63,7 @@ export default function EscalationsPage() {
                   <Clock size={12} /> {timeAgo(e.created_at)}
                 </span>
               </div>
+              {canResolve && (
               <div className="flex gap-2">
                 <button
                   onClick={() =>
@@ -90,6 +94,7 @@ export default function EscalationsPage() {
                   Mark resolved
                 </button>
               </div>
+              )}
             </div>
           </Card>
         )

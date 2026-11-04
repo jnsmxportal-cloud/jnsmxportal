@@ -40,9 +40,9 @@ const tabs = [
 export default function StaffShell() {
   const location = useLocation()
   const navigate = useNavigate()
-  const { profile } = useAuth()
-  // SCRUM-10: staff cannot create tasks — managers and team leaders raise them
-  const canCreate = profile?.role !== 'staff'
+  const { can } = useAuth()
+  // SCRUM-10: only roles with the "Create tasks" right see the + tab
+  const canCreate = can('tasks.create')
   const visibleTabs = tabs.filter((tb) => tb.id !== 'new' || canCreate)
   const isFlow =
     ['/staff/runner', '/staff/temp', '/staff/delivery', '/staff/incident', '/staff/success', '/staff/new', '/staff/invoice'].some(

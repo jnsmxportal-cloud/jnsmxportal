@@ -30,6 +30,7 @@ import { timeAgo, todayLabel } from '../../lib/format'
 import { Avatar } from '../../components/ui'
 import CreateTaskModal from './CreateTaskModal'
 import { useThreads } from '../../data/messages'
+import { baseLabel, type PermissionKey } from '../../data/roles'
 
 export interface OwnerCtx {
   storeId: string | 'all'
@@ -55,14 +56,16 @@ const navDefs: {
   end?: boolean
   badge?: 'approvals' | 'escalations' | 'inbox'
   ownerOnly?: boolean
+  /** hidden unless the member's role grants this right */
+  perm?: PermissionKey
 }[] = [
   { to: '/owner', label: 'Dashboard', icon: SquaresFour, end: true },
-  { to: '/owner/approvals', label: 'Approvals', icon: SealCheck, badge: 'approvals' },
+  { to: '/owner/approvals', label: 'Approvals', icon: SealCheck, badge: 'approvals', perm: 'tasks.review' },
   { to: '/owner/deliveries', label: 'Deliveries', icon: Truck },
   { to: '/owner/escalations', label: 'Escalations', icon: WarningOctagon, badge: 'escalations' },
-  { to: '/owner/inbox', label: 'Inbox', icon: ChatCircleDots, badge: 'inbox' },
+  { to: '/owner/inbox', label: 'Inbox', icon: ChatCircleDots, badge: 'inbox', perm: 'inbox.use' },
   { to: '/owner/rota', label: 'Rota', icon: CalendarBlank },
-  { to: '/owner/reports', label: 'Reports', icon: ChartBar },
+  { to: '/owner/reports', label: 'Reports', icon: ChartBar, perm: 'reports.view' },
   { to: '/owner/stores', label: 'Stores & geofence', icon: MapPin },
   { to: '/owner/admin', label: 'Admin', icon: GearSix, ownerOnly: true },
 ]
@@ -80,7 +83,7 @@ const titles: Record<string, string> = {
 }
 
 export default function OwnerLayout() {
-  const { profile, stores, signOut } = useAuth()
+  const { profile, role, can, stores, signOut } = useAuth()
   const [storeId, setStoreId] = useState<string | 'all'>('all')
   const [notifOpen, setNotifOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
@@ -102,12 +105,13 @@ export default function OwnerLayout() {
   const { unreadTotal } = useThreads()
   const unread = (notifs ?? []).filter((n) => !n.read_at).length
 
+  const roleName = role?.name ?? baseLabel(profile!.role)
   const roleLabel =
     profile!.role === 'owner'
-      ? `Store Owner · ${stores.length} stores`
+      ? `${roleName} · ${stores.length} stores`
       : profile!.role === 'manager'
-        ? 'Manager · monitoring'
-        : 'Remote Office'
+        ? `${roleName} · monitoring`
+        : roleName
 
   return (
     <div className="flex h-full min-h-0 bg-canvas">
@@ -137,7 +141,9 @@ export default function OwnerLayout() {
           </div>
         </div>
         <div className="flex flex-col gap-0.5">
-          {navDefs.filter((n) => !n.ownerOnly || profile!.role === 'owner').map((n) => {
+          {navDefs
+            .filter((n) => (!n.ownerOnly || profile!.role === 'owner') && (!n.perm || can(n.perm)))
+            .map((n) => {
             const badge =
               n.badge === 'approvals'
                 ? approvalsCount
@@ -289,7 +295,7 @@ export default function OwnerLayout() {
                 </div>
               )}
             </div>
-            {profile!.role !== 'manager' && (
+            {can('tasks.create') && (
               <button
                 onClick={() => setCreateOpen(true)}
                 className="flex h-10 flex-none items-center gap-[7px] rounded-xl bg-brand px-3 text-[13px] font-semibold text-white lg:px-4"

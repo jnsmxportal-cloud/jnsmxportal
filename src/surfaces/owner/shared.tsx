@@ -264,7 +264,15 @@ export function ApprovalActions({
 }) {
   const review = useReviewTask()
   const toast = useToast()
+  const { can } = useAuth()
   const [modal, setModal] = useState<'rejected' | 'reopened' | null>(null)
+
+  if (!can('tasks.review'))
+    return (
+      <div className="rounded-[10px] border border-dashed border-ink/15 px-3 py-2 text-[11.5px] text-muted">
+        Your role can’t approve or reject submissions.
+      </div>
+    )
 
   const act = (verdict: 'approved' | 'rejected' | 'reopened', feedback?: string) => {
     review.mutate(
