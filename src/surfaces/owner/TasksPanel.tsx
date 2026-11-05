@@ -17,7 +17,14 @@ import { useToast } from '../../components/Toast'
 import { useAuth } from '../../auth/AuthProvider'
 import { useProfiles, useTasks } from '../../data/hooks'
 import { useTemplates, useUserStoreRoles } from '../../data/admin'
-import { isOpenStatus, useDeleteTask, useSetTaskStatus, useUpdateTask } from '../../data/taskAdmin'
+import {
+  isOpenStatus,
+  useBulkTasks,
+  useCancelReasons,
+  useDeleteTask,
+  useSetTaskStatus,
+  useUpdateTask,
+} from '../../data/taskAdmin'
 import { dueLabel, timeAgo } from '../../lib/format'
 import type { TaskInstance, TaskPriority } from '../../lib/types'
 import { taskStatusStyle as statusStyle, useKindMeta, useNames } from './shared'
@@ -64,6 +71,19 @@ function inGroup(t: TaskInstance, g: StatusGroup): boolean {
   }
 }
 
+/** only open or missed work can be cancelled; finished / in-review tasks keep their outcome */
+function canCancel(t: TaskInstance): boolean {
+  return isOpenStatus(t.status) || t.status === 'missed'
+}
+
+type AgeFilter = 'any' | '1' | '7' | '30'
+const ageOptions: { id: AgeFilter; label: string }[] = [
+  { id: 'any', label: 'Any age' },
+  { id: '1', label: 'Older than 1 day' },
+  { id: '7', label: 'Older than 7 days' },
+  { id: '30', label: 'Older than 30 days' },
+]
+
 /** ISO → the local 'YYYY-MM-DDTHH:MM' the DateTimeField edits */
 function toLocalInput(iso: string | null): string {
   return iso ? format(new Date(iso), "yyyy-MM-dd'T'HH:mm") : ''
@@ -88,8 +108,13 @@ export default function TasksPanel() {
   const [storeId, setStoreId] = useState<string>('all')
   const [templateId, setTemplateId] = useState<string>('all')
   const [search, setSearch] = useState('')
+  const [age, setAge] = useState<AgeFilter>('any')
   const [editing, setEditing] = useState<TaskInstance | null>(null)
   const [deleting, setDeleting] = useState<TaskInstance | null>(null)
+  // tidy-up: ticked task ids, and the bulk action being confirmed
+  const [selected, setSelected] = useState<Set<string>>(() => new Set())
+  const [bulk, setBulk] = useState<{ action: 'cancel' | 'delete'; tasks: TaskInstance[] } | null>(null)
+  const { data: cancelReasons } = useCancelReasons(group === 'cancelled' || group === 'all')
 
   const templateTitle = useMemo(
     () => Object.fromEntries((templates ?? []).map((t) => [t.id, t.title])),
@@ -107,9 +132,12 @@ export default function TasksPanel() {
 
   const list = useMemo(() => {
     const q = search.trim().toLowerCase()
+    // age = how long ago the task was due (or created, when it has no deadline)
+    const cutoff = age === 'any' ? null : Date.now() - Number(age) * 24 * 3600e3
     const rows = all.filter(
       (t) =>
         inGroup(t, group) &&
+        (cutoff === null || new Date(t.due_at ?? t.created_at).getTime() < cutoff) &&
         (storeId === 'all' || t.store_id === storeId) &&
         (templateId === 'all' ||
           (templateId === 'manual' ? !t.template_id : t.template_id === templateId)) &&
@@ -126,14 +154,27 @@ export default function TasksPanel() {
         ),
       )
     return rows
-  }, [all, group, storeId, templateId, search, storeName, userName])
+  }, [all, group, storeId, templateId, search, age, storeName, userName])
 
-  const act = (t: TaskInstance, action: 'cancel' | 'reopen') =>
+  // selection only ever acts on what is currently shown, so a filter change can't sweep up
+  // hidden tasks
+  const picked = list.filter((t) => selected.has(t.id))
+  const allShownPicked = list.length > 0 && picked.length === list.length
+  const toggle = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  const toggleAll = () => setSelected(allShownPicked ? new Set() : new Set(list.map((t) => t.id)))
+  const cancellable = picked.filter(canCancel)
+
+  const reopen = (t: TaskInstance) =>
     setStatus.mutate(
-      { instance: t, action },
+      { instance: t, action: 'reopen' },
       {
-        onSuccess: () =>
-          toast(action === 'cancel' ? `“${t.title}” cancelled` : `“${t.title}” reopened for staff`),
+        onSuccess: () => toast(`“${t.title}” reopened for staff`),
         onError: (e) => toast(e.message, 'error'),
       },
     )
@@ -166,7 +207,7 @@ export default function TasksPanel() {
         ))}
       </div>
 
-      <div className="mb-3.5 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto_auto]">
+      <div className="mb-3.5 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto_auto_auto]">
         <div className="relative">
           <MagnifyingGlass size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
           <input
@@ -186,16 +227,72 @@ export default function TasksPanel() {
         </select>
         <select value={templateId} onChange={(e) => setTemplateId(e.target.value)} className={inputCls}>
           <option value="all">Any template</option>
-          <option value="manual">No template (manual)</option>
+          <option value="manual">No template (manual or template deleted)</option>
           {(templates ?? []).map((t) => (
             <option key={t.id} value={t.id}>
               {t.title}
             </option>
           ))}
         </select>
+        <select value={age} onChange={(e) => setAge(e.target.value as AgeFilter)} className={inputCls}>
+          {ageOptions.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.label}
+            </option>
+          ))}
+        </select>
       </div>
 
+      {group === 'missed' && counts.missed > 0 && (
+        <div className="mb-3 rounded-xl border border-line bg-white px-3.5 py-2.5 text-[11.5px] leading-relaxed text-slate">
+          <b className="text-ink">Tidying up missed tasks:</b> a real missed task is a record that work wasn’t done —
+          keep those. Tick the ones that shouldn’t count (test data, store closed, duplicates) and <b>Cancel</b> them
+          with a reason: they leave the missed list and stop counting against compliance, but the record stays.{' '}
+          <b>Delete</b> removes tasks for good.
+        </div>
+      )}
+
       <Card className="divide-y divide-line">
+        {list.length > 0 && (
+          <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2.5 rounded-t-2xl bg-white/95 px-3.5 py-2.5 backdrop-blur">
+            <label className="flex cursor-pointer items-center gap-2 text-[12px] font-semibold text-slate">
+              <input
+                type="checkbox"
+                checked={allShownPicked}
+                ref={(el) => {
+                  if (el) el.indeterminate = picked.length > 0 && !allShownPicked
+                }}
+                onChange={toggleAll}
+                className="h-4 w-4 accent-[#FF5A2D]"
+              />
+              {picked.length ? `${picked.length} of ${list.length} selected` : `Select all ${list.length} shown`}
+            </label>
+            {picked.length > 0 && (
+              <div className="ml-auto flex flex-wrap items-center gap-1.5">
+                <button
+                  onClick={() => setBulk({ action: 'cancel', tasks: cancellable })}
+                  disabled={cancellable.length === 0}
+                  title={cancellable.length ? undefined : 'Only open or missed tasks can be cancelled'}
+                  className="flex items-center gap-1.5 rounded-[10px] border border-ink/15 bg-white px-3 py-1.5 text-xs font-semibold text-slate disabled:opacity-50"
+                >
+                  <XCircle size={14} /> Cancel{cancellable.length !== picked.length ? ` ${cancellable.length}` : ''}…
+                </button>
+                <button
+                  onClick={() => setBulk({ action: 'delete', tasks: picked })}
+                  className="flex items-center gap-1.5 rounded-[10px] border border-danger/30 bg-danger-soft px-3 py-1.5 text-xs font-semibold text-danger"
+                >
+                  <Trash size={14} /> Delete…
+                </button>
+                <button
+                  onClick={() => setSelected(new Set())}
+                  className="rounded-[10px] px-2 py-1.5 text-xs font-semibold text-muted"
+                >
+                  Clear
+                </button>
+              </div>
+            )}
+          </div>
+        )}
         {isLoading && <div className="p-8 text-center text-xs text-muted">Loading tasks…</div>}
         {!isLoading && list.length === 0 && (
           <div className="p-8 text-center text-xs text-muted">
@@ -209,7 +306,17 @@ export default function TasksPanel() {
           const open = isOpenStatus(t.status)
           const showDue = open || t.status === 'missed'
           return (
-            <div key={t.id} className="flex flex-wrap items-center gap-3 p-3.5 sm:flex-nowrap">
+            <div
+              key={t.id}
+              className={`flex flex-wrap items-center gap-3 p-3.5 sm:flex-nowrap ${selected.has(t.id) ? 'bg-brand-tint/40' : ''}`}
+            >
+              <input
+                type="checkbox"
+                checked={selected.has(t.id)}
+                onChange={() => toggle(t.id)}
+                aria-label={`Select ${t.title}`}
+                className="h-4 w-4 flex-none accent-[#FF5A2D]"
+              />
               <div
                 className="flex h-9 w-9 flex-none items-center justify-center rounded-[10px]"
                 style={{ background: b }}
@@ -235,10 +342,15 @@ export default function TasksPanel() {
                       · from <span className="text-slate">{templateTitle[t.template_id] ?? 'template'}</span>
                     </>
                   )}
-                  {!t.template_id && ' · manual'}
+                  {!t.template_id && (t.generated_key ? ' · template deleted' : ' · manual')}
                   {' · created '}
                   {timeAgo(t.created_at)}
                 </div>
+                {t.status === 'cancelled' && cancelReasons?.[t.id] && (
+                  <div className="mt-0.5 text-[11.5px] text-slate">
+                    Cancelled: <span className="font-semibold">{cancelReasons[t.id]}</span>
+                  </div>
+                )}
               </div>
               <div className="flex flex-none items-center gap-3 text-right">
                 {showDue && (
@@ -278,10 +390,10 @@ export default function TasksPanel() {
                       <PencilSimple size={16} />
                     </button>
                   )}
-                  {open && (
+                  {canCancel(t) && (
                     <button
-                      onClick={() => act(t, 'cancel')}
-                      title="Cancel task"
+                      onClick={() => setBulk({ action: 'cancel', tasks: [t] })}
+                      title="Cancel task (keeps the record, stops it counting)"
                       className="rounded-lg p-1.5 text-slate hover:bg-canvas"
                     >
                       <XCircle size={16} />
@@ -289,7 +401,7 @@ export default function TasksPanel() {
                   )}
                   {(t.status === 'missed' || t.status === 'cancelled') && (
                     <button
-                      onClick={() => act(t, 'reopen')}
+                      onClick={() => reopen(t)}
                       title="Reopen for staff"
                       className="rounded-lg p-1.5 text-slate hover:bg-canvas"
                     >
@@ -312,6 +424,164 @@ export default function TasksPanel() {
 
       {editing && <TaskEditModal task={editing} onClose={() => setEditing(null)} />}
       {deleting && <DeleteTaskModal task={deleting} onClose={() => setDeleting(null)} />}
+      {bulk && (
+        <BulkTaskModal
+          action={bulk.action}
+          tasks={bulk.tasks}
+          onClose={() => setBulk(null)}
+          onDone={() => {
+            setBulk(null)
+            setSelected(new Set())
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+const REASONS = ['Test data', 'Store closed', 'Duplicate', 'No longer needed', 'Done but not recorded']
+
+/** Confirm a cancel / delete of one or many tasks, with a reason kept on the audit trail. */
+function BulkTaskModal({
+  action,
+  tasks,
+  onClose,
+  onDone,
+}: {
+  action: 'cancel' | 'delete'
+  tasks: TaskInstance[]
+  onClose: () => void
+  onDone: () => void
+}) {
+  const toast = useToast()
+  const run = useBulkTasks()
+  const [preset, setPreset] = useState<string | null>(null)
+  const [note, setNote] = useState('')
+  const [sure, setSure] = useState(false)
+  const del = action === 'delete'
+  const n = tasks.length
+  const reason = [preset, note.trim()].filter(Boolean).join(' — ') || null
+  const byStatus = Object.entries(
+    tasks.reduce<Record<string, number>>((acc, t) => ({ ...acc, [t.status]: (acc[t.status] ?? 0) + 1 }), {}),
+  )
+  const withPhotos = tasks.some((t) => t.status === 'completed' || t.status === 'approved' || t.status === 'submitted')
+  const label = n === 1 ? `“${tasks[0].title}”` : `${n} tasks`
+
+  const go = () => {
+    if (!del && !reason) {
+      toast('Pick or type a reason', 'error')
+      return
+    }
+    run.mutate(
+      { tasks, action, reason },
+      {
+        onSuccess: ({ done, skipped }) => {
+          toast(
+            `${done} task${done === 1 ? '' : 's'} ${del ? 'deleted' : 'cancelled'}${skipped ? ` · ${skipped} skipped` : ''}`,
+            skipped ? 'warn' : 'success',
+          )
+          onDone()
+        },
+        onError: (e) => toast(e.message, 'error'),
+      },
+    )
+  }
+
+  return (
+    <div onClick={onClose} className="fixed inset-0 z-[80] flex items-center justify-center bg-navy/50 p-3 sm:p-6">
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="flex max-h-[92dvh] w-[480px] max-w-full animate-fade flex-col overflow-hidden rounded-[20px] bg-white shadow-[0_30px_80px_rgba(0,0,0,.3)]"
+      >
+        <div className="border-b border-line px-6 py-4">
+          <div className="flex items-center gap-2 font-display text-[17px] font-bold">
+            {del ? <Warning size={20} weight="fill" color="#E5484D" /> : <XCircle size={20} color="#5B6478" />}
+            {del ? `Delete ${label}?` : `Cancel ${label}?`}
+          </div>
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {byStatus.map(([s, c]) => {
+              const st = statusStyle[s] ?? statusStyle.assigned
+              return (
+                <span key={s} className="rounded-full px-2 py-px text-[10.5px] font-bold" style={{ color: st.c, background: st.b }}>
+                  {c} {st.label.toLowerCase()}
+                </span>
+              )
+            })}
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-4 overflow-y-auto px-6 py-5">
+          <div className="text-[12.5px] leading-relaxed text-slate">
+            {del ? (
+              <>
+                Removed permanently, with their checklist progress, photos, signatures and approvals. The scheduler
+                won’t recreate them. This can’t be undone — use <b>Cancel</b> instead to keep the record.
+              </>
+            ) : (
+              <>
+                They leave staff lists and the missed list and stop counting against compliance. The record and any
+                evidence are kept, and you can reopen them later from the <b>Cancelled</b> tab.
+              </>
+            )}
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold text-slate">
+              Reason {del ? '(optional)' : ''}
+            </label>
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {REASONS.map((r) => (
+                <button key={r} onClick={() => setPreset(preset === r ? null : r)} className={chip(preset === r)}>
+                  {r}
+                </button>
+              ))}
+            </div>
+            <input
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder={preset ? 'Add detail (optional)' : 'Or type a reason…'}
+              maxLength={200}
+              className={modalInput}
+            />
+            <div className="mt-1 text-[11px] text-muted">Saved on the audit trail{del ? '' : ' and shown on each cancelled task'}.</div>
+          </div>
+
+          {del && (
+            <label className="flex cursor-pointer items-start gap-2 text-[12px] text-slate">
+              <input
+                type="checkbox"
+                checked={sure}
+                onChange={(e) => setSure(e.target.checked)}
+                className="mt-0.5 h-4 w-4 accent-[#E5484D]"
+              />
+              <span>
+                I understand {n === 1 ? 'this task' : `these ${n} tasks`} will be deleted permanently
+                {withPhotos ? ', including completed work and its evidence' : ''}.
+              </span>
+            </label>
+          )}
+        </div>
+
+        <div className="flex gap-2.5 border-t border-line px-6 py-4">
+          <button onClick={onClose} className="flex-1 rounded-xl border border-ink/15 bg-white p-3 text-[13.5px] font-semibold text-slate">
+            Back
+          </button>
+          <button
+            onClick={go}
+            disabled={run.isPending || (del && !sure) || (!del && !reason)}
+            className="flex-[1.4] rounded-xl p-3 text-[13.5px] font-bold text-white disabled:opacity-50"
+            style={{ background: del ? '#E5484D' : '#151B28' }}
+          >
+            {run.isPending
+              ? del
+                ? 'Deleting…'
+                : 'Cancelling…'
+              : del
+                ? `Delete ${n === 1 ? 'task' : `${n} tasks`}`
+                : `Cancel ${n === 1 ? 'task' : `${n} tasks`}`}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

@@ -15,7 +15,7 @@ import { useAuth } from '../../auth/AuthProvider'
 import {
   useChecklistItems,
   useSubmitChecklist,
-  useTasks,
+  useTask,
   useToggleChecklistItem,
 } from '../../data/hooks'
 import { useToast } from '../../components/Toast'
@@ -233,8 +233,9 @@ export default function Runner() {
   const toast = useToast()
   const { session } = useAuth()
   const store = useStaffStore()
-  const { data: tasks } = useTasks({ storeId: 'all' })
-  const instance = (tasks ?? []).find((t) => t.id === id) ?? null
+  // just this task (not the whole history), so it opens fast and never falls outside a page
+  const { data: task } = useTask(id)
+  const instance = task ?? null
   const { data: items } = useChecklistItems(id ?? null)
   const { result: geo, checking, retry } = useGeofence(store)
   const submit = useSubmitChecklist()
@@ -263,6 +264,15 @@ export default function Runner() {
     (geo?.verdict === 'off_site' || noLocation)
   const canSubmit =
     (total === 0 || done === total) && (!requiresSig || sig.signed) && photoOk && !blocked
+  // only what is actually still missing, so staff are never left guessing why Submit is grey
+  const missing = [
+    total > 0 && done < total && `tick ${total - done} more item${total - done === 1 ? '' : 's'}`,
+    requiresPhoto && !photoOk && 'add a photo',
+    requiresSig && !sig.signed && 'sign above',
+  ].filter(Boolean) as string[]
+  const missingSteps = missing.length
+    ? `${missing.join(', ').replace(/^./, (c) => c.toUpperCase())} to submit`
+    : 'Submit checklist'
 
   const onPhoto = (item: ChecklistItem | null) => {
     photoItem.current = item
@@ -383,7 +393,7 @@ export default function Runner() {
   }
 
   if (!instance) {
-    if (tasks === undefined) return null
+    if (task === undefined) return null
     return (
       <div className="flex min-h-full flex-col items-center justify-center gap-2 bg-canvas p-6 text-center">
         <div className="text-[15px] font-bold">Task not found</div>
@@ -567,9 +577,7 @@ export default function Runner() {
               : 'Blocked — outside geofence'
             : canSubmit
               ? 'Submit checklist'
-              : `Complete all items${requiresPhoto && !photoOk ? ', add a photo' : ''}${
-                  requiresSig ? ' & sign' : ''
-                } to submit`}
+              : missingSteps}
         </button>
       </div>
     </div>

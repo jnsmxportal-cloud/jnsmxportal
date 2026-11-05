@@ -11,7 +11,7 @@ import {
   WarningOctagon,
   X,
 } from '@phosphor-icons/react'
-import { useStoreUnits, useSubmitTempLog, useTasks } from '../../data/hooks'
+import { useStoreUnits, useSubmitTempLog, useTask } from '../../data/hooks'
 import { clearTempDraft, loadTempDraft, saveTempDraft, tempDraftKey } from '../../data/ops'
 import { useToast } from '../../components/Toast'
 import WheelPicker from '../../components/WheelPicker'
@@ -48,8 +48,9 @@ export default function TempLog() {
   const toast = useToast()
   const store = useStaffStore()
   const { data: units } = useStoreUnits(store?.id)
-  const { data: tasks } = useTasks({ storeId: 'all' })
-  const instance = (tasks ?? []).find((t) => t.id === id) ?? null
+  // ad-hoc logs have no id; a scheduled log loads just its own task
+  const { data: task } = useTask(id)
+  const instance = (id && task) || null
   const { result: geo, checking, retry } = useGeofence(store)
   const submit = useSubmitTempLog()
   const [vals, setVals] = useState<Record<string, number>>({})

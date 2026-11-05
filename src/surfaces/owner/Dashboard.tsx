@@ -46,20 +46,27 @@ export default function Dashboard() {
   const active = tasks.filter((t) => ['assigned', 'in_progress', 'rejected'].includes(t.status))
   const completedToday = tasks.filter((t) => t.completed_at && isToday(new Date(t.completed_at)))
   const pendingReview = tasks.filter((t) => t.status === 'submitted')
+  // missed tasks are final and pile up forever, so the dashboard shows only fresh ones (missed in
+  // the last 24 h); older ones live in Admin → Tasks → Missed and Reports
+  const now = Date.now()
+  const recentlyMissed = (t: TaskInstance) =>
+    t.status === 'missed' && new Date(t.cutoff_at ?? t.due_at ?? t.created_at).getTime() > now - 24 * 3600e3
   const overdue = tasks.filter(
     (t) =>
-      t.status === 'missed' ||
-      (['assigned', 'in_progress', 'rejected'].includes(t.status) &&
-        t.due_at &&
-        new Date(t.due_at) < new Date()),
+      recentlyMissed(t) ||
+      (['assigned', 'in_progress', 'rejected'].includes(t.status) && t.due_at && new Date(t.due_at).getTime() < now),
+  )
+  // compliance over the last 30 days (Reports' default range), not all time
+  const since = now - 30 * 24 * 3600e3
+  const recentTasks = (allTasks ?? []).filter(
+    (t) => new Date(t.due_at ?? t.created_at).getTime() >= since,
   )
   const visibleStores = storeId === 'all' ? stores : stores.filter((s) => s.id === storeId)
   const compliance =
     visibleStores.length === 0
       ? 100
       : Math.round(
-          visibleStores.reduce((a, s) => a + storeCompliance(allTasks ?? [], s.id), 0) /
-            visibleStores.length,
+          visibleStores.reduce((a, s) => a + storeCompliance(recentTasks, s.id), 0) / visibleStores.length,
         )
 
   const scopeLabel = storeId === 'all' ? 'all stores' : storeName(storeId)
@@ -105,7 +112,7 @@ export default function Dashboard() {
       Icon: ClockCountdown,
       c: '#E5484D',
       b: '#FCEBEC',
-      hint: 'Past their due time or missed the cutoff',
+      hint: 'Open tasks past their due time, plus tasks missed in the last 24 h (older ones: Admin → Tasks → Missed)',
       onLook: () => setList({ title: 'Overdue & missed', sub: scopeLabel, tasks: overdue }),
     },
     {
@@ -114,7 +121,7 @@ export default function Dashboard() {
       Icon: ShieldCheck,
       c: '#7C3AED',
       b: '#F1EBFC',
-      hint: 'Open the Reports page',
+      hint: 'Last 30 days · open the Reports page',
       onLook: () => navigate('/owner/reports'),
     },
   ]
@@ -278,6 +285,7 @@ export default function Dashboard() {
             <div className="flex items-center gap-2 border-b border-ink/5 px-[17px] py-[15px]">
               <ClockCountdown size={16} weight="fill" color="#E5484D" />
               <h3 className="text-sm font-bold">Overdue &amp; missed</h3>
+              <span className="text-[11px] text-muted">missed: last 24 h</span>
               <span className="ml-auto rounded-full bg-danger-soft px-2 py-0.5 text-[11px] font-bold text-danger">
                 {overdue.length}
               </span>

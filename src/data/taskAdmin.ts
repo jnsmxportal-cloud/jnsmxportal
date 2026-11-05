@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase, ORG_ID } from '../lib/supabase'
 import { useAuth } from '../auth/AuthProvider'
 import { audit, notify } from './ops'
@@ -117,6 +117,136 @@ export function useSetTaskStatus() {
       })
     },
     onSuccess: () => qc.invalidateQueries(),
+  })
+}
+
+// ---------- bulk tidy-up ----------
+
+/** ids per request: keeps the `id=in.(…)` URL well under proxy limits */
+const CHUNK = 100
+function chunks<T>(a: T[], n = CHUNK): T[][] {
+  const out: T[][] = []
+  for (let i = 0; i < a.length; i += n) out.push(a.slice(i, i + n))
+  return out
+}
+
+export interface BulkTaskArgs {
+  tasks: TaskInstance[]
+  /** cancel = keep the record but take it out of staff lists and compliance; delete = remove */
+  action: 'cancel' | 'delete'
+  /** why, e.g. "Test data" — stored on the audit row and shown on cancelled tasks */
+  reason: string | null
+}
+
+/**
+ * Cancel or delete many tasks at once (Admin → Tasks tidy-up). Works in chunks, writes one audit
+ * row per task (with the reason) and returns how many rows the database actually changed, so
+ * RLS refusals are reported instead of silently "succeeding".
+ */
+export function useBulkTasks() {
+  const qc = useQueryClient()
+  const { session } = useAuth()
+  return useMutation({
+    mutationFn: async ({ tasks, action, reason }: BulkTaskArgs): Promise<{ done: number; skipped: number }> => {
+      const uid = session!.user.id
+      const auditRows = (part: TaskInstance[], extra: (t: TaskInstance) => object) =>
+        part.map((t) => ({
+          org_id: ORG_ID,
+          actor: uid,
+          action: action === 'cancel' ? 'task.cancelled' : 'task.deleted',
+          entity: 'task_instance',
+          entity_id: t.id,
+          detail: { ...extra(t), reason, bulk: true },
+        }))
+      let done = 0
+
+      if (action === 'cancel') {
+        const targets = tasks.filter((t) => t.status !== 'cancelled')
+        const cancelled: TaskInstance[] = []
+        for (const part of chunks(targets)) {
+          const { data, error } = await supabase
+            .from('task_instances')
+            .update({ status: 'cancelled' })
+            .in(
+              'id',
+              part.map((t) => t.id),
+            )
+            .select('id')
+          if (error) throw error
+          const ok = new Set((data ?? []).map((r: { id: string }) => r.id))
+          const changed = part.filter((t) => ok.has(t.id))
+          cancelled.push(...changed)
+          done += changed.length
+          if (changed.length) {
+            const { error: aErr } = await supabase
+              .from('audit_log')
+              .insert(auditRows(changed, (t) => ({ from: t.status })))
+            if (aErr) console.warn('audit: insert failed —', aErr.message)
+          }
+        }
+        // people who still had one of these on their list: one notice each
+        const byUser = new Map<string, TaskInstance[]>()
+        for (const t of cancelled)
+          if (t.assigned_to && isOpenStatus(t.status))
+            byUser.set(t.assigned_to, [...(byUser.get(t.assigned_to) ?? []), t])
+        for (const [user, list] of byUser)
+          await notify([user], {
+            org_id: ORG_ID,
+            type: 'cancelled',
+            title: list.length === 1 ? `Cancelled: ${list[0].title}` : `${list.length} of your tasks were cancelled`,
+            body: reason,
+            deep_link: '/staff/tasks',
+            icon: 'x-circle',
+          } as never)
+        return { done, skipped: tasks.length - done }
+      }
+
+      for (const part of chunks(tasks)) {
+        // audit first: the rows (and their ids) are gone after the delete
+        const { error: aErr } = await supabase.from('audit_log').insert(
+          auditRows(part, (t) => ({
+            title: t.title,
+            store_id: t.store_id,
+            status: t.status,
+            template_id: t.template_id,
+          })),
+        )
+        if (aErr) console.warn('audit: insert failed —', aErr.message)
+        const { error, count } = await supabase
+          .from('task_instances')
+          .delete({ count: 'exact' })
+          .in(
+            'id',
+            part.map((t) => t.id),
+          )
+        if (error) throw error
+        done += count ?? 0
+      }
+      if (done === 0 && tasks.length) throw new Error('Nothing was deleted — only an Owner can delete tasks.')
+      return { done, skipped: tasks.length - done }
+    },
+    onSuccess: () => qc.invalidateQueries(),
+  })
+}
+
+/** Latest cancel reason per task id (from the audit trail), for showing on cancelled tasks. */
+export function useCancelReasons(enabled: boolean) {
+  return useQuery({
+    queryKey: ['cancel-reasons'],
+    enabled,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('audit_log')
+        .select('entity_id, detail, created_at')
+        .eq('action', 'task.cancelled')
+        .order('created_at', { ascending: false })
+        .limit(1000)
+      if (error) throw error
+      const out: Record<string, string> = {}
+      for (const r of (data ?? []) as { entity_id: string; detail: { reason?: string | null } | null }[])
+        if (!(r.entity_id in out) && r.detail?.reason) out[r.entity_id] = r.detail.reason
+      return out
+    },
   })
 }
 

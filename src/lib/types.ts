@@ -80,6 +80,8 @@ export interface TaskInstance {
   id: string
   org_id: string
   template_id: string | null
+  /** set on scheduler-generated tasks (template:store:date:time); null for manual / Run now */
+  generated_key?: string | null
   store_id: string
   title: string
   description: string | null

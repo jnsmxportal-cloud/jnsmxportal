@@ -48,19 +48,44 @@ export function useProfiles() {
   })
 }
 
+// PostgREST returns at most this many rows per request (Supabase "Max rows" setting), so
+// anything that can outgrow it must page; a single request would silently drop the rest
+const PAGE = 1000
+
 export function useTasks(filter?: { storeId?: string | 'all' }) {
   const storeId = filter?.storeId
   return useQuery({
     queryKey: ['tasks', storeId ?? 'all'],
     queryFn: async () => {
-      let q = supabase
-        .from('task_instances')
-        .select('*')
-        .order('due_at', { ascending: true, nullsFirst: false })
-      if (storeId && storeId !== 'all') q = q.eq('store_id', storeId)
-      const { data, error } = await q
+      const out: TaskInstance[] = []
+      for (let from = 0; ; from += PAGE) {
+        let q = supabase
+          .from('task_instances')
+          .select('*')
+          .order('due_at', { ascending: true, nullsFirst: false })
+          // unique tie-breaker so pages never overlap or skip rows
+          .order('id', { ascending: true })
+          .range(from, from + PAGE - 1)
+        if (storeId && storeId !== 'all') q = q.eq('store_id', storeId)
+        const { data, error } = await q
+        if (error) throw error
+        out.push(...(data as TaskInstance[]))
+        if (!data || data.length < PAGE) break
+      }
+      return out
+    },
+  })
+}
+
+/** One task by id (null = not found / not visible), for screens that work on a single task. */
+export function useTask(id: string | null | undefined) {
+  return useQuery({
+    queryKey: ['task', id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data, error } = await supabase.from('task_instances').select('*').eq('id', id!).maybeSingle()
       if (error) throw error
-      return data as TaskInstance[]
+      return (data as TaskInstance | null) ?? null
     },
   })
 }
