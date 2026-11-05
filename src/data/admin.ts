@@ -94,6 +94,74 @@ export function escalateAfterHours(r: Recurrence | null | undefined): number | n
   return Math.max(0, Math.round((diff < 0 ? diff + 1440 : diff) / 60))
 }
 
+/** ms to add to a UTC instant to get the wall-clock time in `tz` at that instant */
+function tzOffsetMs(tz: string, utcMs: number): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(new Date(utcMs))
+  const get = (k: string) => Number(parts.find((p) => p.type === k)?.value ?? 0)
+  const wall = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour') % 24, get('minute'), get('second'))
+  return wall - (utcMs - (utcMs % 1000))
+}
+
+/** store-local 'YYYY-MM-DDTHH:MM' in `tz` → the UTC instant (DST-safe, like the scheduler's `at time zone`) */
+export function zonedToUtc(local: string, tz: string): Date {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(local)
+  if (!m) return new Date(NaN)
+  const guess = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]))
+  const off = tzOffsetMs(tz, guess)
+  let t = guess - off
+  const off2 = tzOffsetMs(tz, t)
+  if (off2 !== off) t = guess - off2
+  return new Date(t)
+}
+
+/** today's date in `tz` as YYYY-MM-DD, shifted by `addDays` */
+function zonedDate(tz: string, now: Date, addDays = 0): string {
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' })
+    .format(now)
+  const [y, mo, d] = today.split('-').map(Number)
+  return new Date(Date.UTC(y, mo - 1, d + addDays)).toISOString().slice(0, 10)
+}
+
+/**
+ * Due + cutoff for a task created on demand from a template ("Run now"): the template's next
+ * deadline at that store. Timed schedules use the next run slot whose deadline is still ahead
+ * (a deadline earlier than its run time falls on the next day, same rule as the scheduler);
+ * one-offs use their due date. Schedules without clock times (month-end, on clock-in, none)
+ * give no due time.
+ */
+export function runNowSchedule(
+  r: Recurrence | null | undefined,
+  tz: string,
+  now: Date = new Date(),
+): { dueAt: Date | null; cutoffAt: Date | null } {
+  let due: Date | null = null
+  if (r?.freq === 'once' && r.due_at) {
+    due = zonedToUtc(r.due_at, tz)
+  } else if ((r?.freq === 'daily' || r?.freq === 'weekly' || r?.freq === 'biweekly') && r.times?.length) {
+    const candidates: Date[] = []
+    for (const dayOffset of [0, 1]) {
+      for (const t of r.times) {
+        const dl = slotDeadline(r, t) || t
+        const day = zonedDate(tz, now, dayOffset + (dl < t ? 1 : 0))
+        candidates.push(zonedToUtc(`${day}T${dl}`, tz))
+      }
+    }
+    due = candidates.sort((a, b) => a.getTime() - b.getTime()).find((d) => d > now) ?? null
+  }
+  if (due && Number.isNaN(due.getTime())) due = null
+  const esc = escalateAfterHours(r)
+  return { dueAt: due, cutoffAt: due && esc !== null ? new Date(due.getTime() + esc * 3600_000) : null }
+}
+
 /** 'YYYY-MM-DDTHH:MM' → 'Mon 3 Nov 14:00' (no timezone conversion: the value is already local) */
 export function formatLocalDateTime(v: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(v)

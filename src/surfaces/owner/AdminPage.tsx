@@ -27,6 +27,7 @@ import { useAuth } from '../../auth/AuthProvider'
 import { useCreateTask, useProfiles, useStoreUnits, useTasks } from '../../data/hooks'
 import {
   recurrenceSummary,
+  runNowSchedule,
   useAdminUsers,
   useDeleteTemplate,
   useDeleteUnit,
@@ -130,7 +131,7 @@ function TemplatesPanel() {
   const [runConfirm, setRunConfirm] = useState<string | null>(null)
   const stats = templateStats(tasks)
 
-  const runNow = (t: TaskTemplate) => {
+  const runNow = async (t: TaskTemplate) => {
     const scope = templateStoreIds(t)
     const storeIds = scope.length
       ? scope.filter((id) => stores.some((s) => s.id === id))
@@ -139,33 +140,50 @@ function TemplatesPanel() {
       toast('No store matches the scope of this template', 'error')
       return
     }
-    create.mutate(
-      {
-        title: t.title,
-        storeIds,
-        assignedTo: null,
-        dueAt: null,
-        priority: t.priority,
-        category: t.category,
-        evidence: t.evidence,
-        templateId: t.id,
-        description: t.description,
-        geofencePolicy: t.geofence_policy,
-        isTemperatureLog: t.is_temperature_log,
-        // requires_approval is inherited from the template by the DB trigger
-      },
-      {
-        onSuccess: () => {
-          setRunConfirm(null)
-          const where =
-            storeIds.length === stores.length
-              ? 'all stores'
-              : `${storeIds.length} store${storeIds.length === 1 ? '' : 's'}`
-          toast(`“${t.title}” created for ${where} · unassigned, no due time`)
-        },
-        onError: (e) => toast(e.message, 'error'),
-      },
-    )
+    // the template's next deadline is store-local, so stores are created per timezone
+    const byTz = new Map<string, string[]>()
+    for (const id of storeIds) {
+      const tz = stores.find((s) => s.id === id)?.timezone || 'Europe/London'
+      byTz.set(tz, [...(byTz.get(tz) ?? []), id])
+    }
+    let dueText = 'no due time'
+    try {
+      for (const [tz, ids] of byTz) {
+        const { dueAt, cutoffAt } = runNowSchedule(t.recurrence, tz)
+        if (dueAt && dueText === 'no due time')
+          dueText = `due ${dueAt.toLocaleString('en-GB', {
+            timeZone: tz,
+            weekday: 'short',
+            day: 'numeric',
+            month: 'short',
+            hour: '2-digit',
+            minute: '2-digit',
+          })}`
+        await create.mutateAsync({
+          title: t.title,
+          storeIds: ids,
+          assignedTo: null,
+          dueAt: dueAt ? dueAt.toISOString() : null,
+          cutoffAt: cutoffAt ? cutoffAt.toISOString() : null,
+          priority: t.priority,
+          category: t.category,
+          evidence: t.evidence,
+          templateId: t.id,
+          description: t.description,
+          geofencePolicy: t.geofence_policy,
+          isTemperatureLog: t.is_temperature_log,
+          // requires_approval is inherited from the template by the DB trigger
+        })
+      }
+      setRunConfirm(null)
+      const where =
+        storeIds.length === stores.length
+          ? 'all stores'
+          : `${storeIds.length} store${storeIds.length === 1 ? '' : 's'}`
+      toast(`“${t.title}” created for ${where} · unassigned, ${dueText}`)
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e), 'error')
+    }
   }
 
   return (
@@ -264,7 +282,7 @@ function TemplatesPanel() {
             ) : (
               <button
                 onClick={() => setRunConfirm(t.id)}
-                title="Create this task now for every store in its scope"
+                title="Create this task now for every store in its scope, due at the template's next deadline"
                 className="flex items-center gap-1.5 rounded-lg border border-brand/40 bg-brand-tint px-3 py-1.5 text-xs font-semibold text-brand-dark"
               >
                 <Play size={13} weight="fill" /> Run now

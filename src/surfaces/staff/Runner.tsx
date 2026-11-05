@@ -25,31 +25,50 @@ import { useStaffStore } from './StaffShell'
 import QrScanner from '../../components/QrScanner'
 import type { ChecklistItem } from '../../lib/types'
 
+/**
+ * Signature pad. The canvas is tracked with a callback ref, so the drawing handlers attach
+ * whenever the canvas actually mounts — the Runner renders nothing until the task has loaded
+ * (cold cache on mobile: deep link, reload, opened from My Tasks), and a mount-only effect
+ * would run before the canvas existed and never attach.
+ */
 function useSignature() {
-  const ref = useRef<HTMLCanvasElement>(null)
+  const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null)
   const [signed, setSigned] = useState(false)
   useEffect(() => {
-    const c = ref.current
+    const c = canvas
     if (!c) return
+    setSigned(false)
     const ctx = c.getContext('2d')!
     ctx.strokeStyle = '#151B28'
+    ctx.fillStyle = '#151B28'
     ctx.lineWidth = 2.5
     ctx.lineCap = 'round'
     ctx.lineJoin = 'round'
-    let drawing = false
+    let drawing: number | null = null // active pointer id
     let last: { x: number; y: number } | null = null
     const pos = (e: PointerEvent) => {
       const r = c.getBoundingClientRect()
       return { x: (e.clientX - r.left) * (c.width / r.width), y: (e.clientY - r.top) * (c.height / r.height) }
     }
     const down = (e: PointerEvent) => {
+      if (drawing !== null) return // ignore a second finger
       e.preventDefault()
-      drawing = true
+      drawing = e.pointerId
+      // keep receiving moves even if the finger slides off the pad
+      try {
+        c.setPointerCapture(e.pointerId)
+      } catch {
+        /* not supported: moves outside the pad are simply dropped */
+      }
       last = pos(e)
+      // a dot, so a tap leaves a mark too
+      ctx.beginPath()
+      ctx.arc(last.x, last.y, ctx.lineWidth / 2, 0, Math.PI * 2)
+      ctx.fill()
       setSigned(true)
     }
     const move = (e: PointerEvent) => {
-      if (!drawing || !last) return
+      if (e.pointerId !== drawing || !last) return
       e.preventDefault()
       const p = pos(e)
       ctx.beginPath()
@@ -58,24 +77,29 @@ function useSignature() {
       ctx.stroke()
       last = p
     }
-    const up = () => {
-      drawing = false
+    const up = (e: PointerEvent) => {
+      if (e.pointerId !== drawing) return
+      drawing = null
+      last = null
     }
     c.addEventListener('pointerdown', down)
     c.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
+    c.addEventListener('pointerup', up)
+    c.addEventListener('pointercancel', up)
+    c.addEventListener('lostpointercapture', up)
     return () => {
       c.removeEventListener('pointerdown', down)
       c.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', up)
+      c.removeEventListener('pointerup', up)
+      c.removeEventListener('pointercancel', up)
+      c.removeEventListener('lostpointercapture', up)
     }
-  }, [])
+  }, [canvas])
   const clear = () => {
-    const c = ref.current
-    if (c) c.getContext('2d')!.clearRect(0, 0, c.width, c.height)
+    if (canvas) canvas.getContext('2d')!.clearRect(0, 0, canvas.width, canvas.height)
     setSigned(false)
   }
-  return { ref, signed, clear }
+  return { ref: setCanvas, canvas, signed, clear }
 }
 
 function ItemRow({
@@ -300,9 +324,9 @@ export default function Runner() {
 
   const doSubmit = async () => {
     if (!instance) return
-    if (requiresSig && sig.signed && sig.ref.current) {
+    if (requiresSig && sig.signed && sig.canvas) {
       try {
-        const canvas = sig.ref.current
+        const canvas = sig.canvas
         const blob = await new Promise<Blob>((resolve, reject) =>
           canvas.toBlob(
             (b) => (b ? resolve(b) : reject(new Error('Could not capture the signature'))),
