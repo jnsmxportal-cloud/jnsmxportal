@@ -4,19 +4,28 @@ import {
   ArrowLeft,
   Camera,
   Check,
+  CircleNotch,
+  FilePdf,
   MapPin,
+  Plus,
+  Scan,
   Warning,
   X,
 } from '@phosphor-icons/react'
 import { useAuth } from '../../auth/AuthProvider'
 import { useSubmitDelivery } from '../../data/hooks'
 import { compressImage } from '../../lib/image'
+import { buildInvoicePdf, enhanceScan, type ScanPage } from '../../lib/invoicePdf'
 import { useToast } from '../../components/Toast'
+import DocScanner from '../../components/DocScanner'
 import GeoChip, { GeoNotice, useGeofence } from './GeoChip'
 import { useStaffStore } from './StaffShell'
 
 const suppliers = ['Booker', 'Coca-Cola Enterprises', 'Nisa', 'Bestway']
-const stepNames = ['Details', 'Photos', 'Remarks', 'Review']
+const stepNames = ['Details', 'Invoice & goods', 'Remarks', 'Review']
+
+/** A scanned invoice page; `page` is null while the scan is still being enhanced. */
+type PageSlot = { id: number; page: ScanPage | null }
 
 export default function DeliveryWizard() {
   const navigate = useNavigate()
@@ -29,12 +38,28 @@ export default function DeliveryWizard() {
   const [step, setStep] = useState(0)
   const [supplier, setSupplier] = useState(suppliers[0])
   const [invoice, setInvoice] = useState('')
+  const [hasDiscrepancy, setHasDiscrepancy] = useState<boolean | null>(null)
   const [qty, setQty] = useState('')
   const [remarks, setRemarks] = useState('')
   const [photos, setPhotos] = useState<{ blob: Blob; url: string }[]>([])
   const fileRef = useRef<HTMLInputElement>(null)
+  const [pages, setPages] = useState<PageSlot[]>([])
+  const [scanning, setScanning] = useState(false)
+  const slotId = useRef(0)
+  const pagesProcessing = pages.some((s) => !s.page)
 
   const qtyNum = parseInt(qty || '0', 10)
+  /** Units short — only counts when staff answered "Yes" (a "No" ignores any stale number). */
+  const unitsShort = hasDiscrepancy && !Number.isNaN(qtyNum) ? qtyNum : 0
+  // step 3: an explicit Yes/No; "Yes" needs a unit count and remarks
+  const discrepancyMissing =
+    hasDiscrepancy === null
+      ? 'Choose Yes or No for quantity discrepancy'
+      : hasDiscrepancy && unitsShort < 1
+        ? 'Enter how many units are short'
+        : hasDiscrepancy && !remarks.trim()
+          ? 'Add remarks describing the discrepancy'
+          : null
   const blocked = geo?.verdict === 'off_site'
   const inputCls =
     'w-full rounded-xl border-[1.5px] border-ink/15 bg-white p-3 text-sm outline-none focus:border-brand'
@@ -57,26 +82,54 @@ export default function DeliveryWizard() {
     })
   }
 
+  /** Each accepted page arrives here; a slot is reserved first so pages keep their scan order. */
+  const onPageScanned = (dataUrl: string) => {
+    const id = ++slotId.current
+    setPages((p) => [...p, { id, page: null }])
+    enhanceScan(dataUrl)
+      .then((page) => setPages((p) => p.map((s) => (s.id === id ? { id, page } : s))))
+      .catch((e) => {
+        setPages((p) => p.filter((s) => s.id !== id))
+        toast(e instanceof Error ? e.message : 'Could not process that page — please rescan it', 'error')
+      })
+  }
+
+  const removePage = (id: number) => setPages((p) => p.filter((s) => s.id !== id))
+
   const next = () => {
+    if (step === 2 && discrepancyMissing) return
     if (step < 3) {
       setStep(step + 1)
       return
     }
-    if (blocked) return
+    if (blocked || pagesProcessing || discrepancyMissing) return
     if (!store) {
       toast('No store assigned to your account', 'error')
       return
     }
+    let invoicePdf: Blob | null = null
+    const scanned = pages.flatMap((s) => (s.page ? [s.page] : []))
+    if (scanned.length) {
+      try {
+        invoicePdf = buildInvoicePdf(scanned)
+      } catch (e) {
+        toast(e instanceof Error ? e.message : 'Could not build the invoice PDF', 'error')
+        return
+      }
+    }
     submit.mutate(
       {
         storeId: store.id,
+        storeName: store.name,
         supplier,
         invoiceNo: invoice,
-        discrepancy: Number.isNaN(qtyNum) ? 0 : qtyNum,
-        remarks,
+        discrepancy: unitsShort,
+        remarks: remarks.trim(),
         photoCount: photos.length,
         photos: photos.map((p) => p.blob),
         geofenceVerdict: geo?.verdict ?? 'unknown',
+        invoicePdf,
+        invoicePages: scanned.length,
       },
       {
         onSuccess: ({ queued }) => {
@@ -87,6 +140,18 @@ export default function DeliveryWizard() {
                 color: '#F59E0B',
                 title: 'Saved offline ⟳',
                 msg: 'No connection right now — the delivery is queued on this device and will sync automatically when you’re back online.',
+              },
+            })
+            return
+          }
+          if (unitsShort > 0) {
+            toast('Discrepancy escalated to the Owner', 'info')
+            navigate('/staff/success', {
+              state: {
+                icon: 'truck',
+                color: '#E5484D',
+                title: 'Delivery submitted · discrepancy escalated',
+                msg: `${unitsShort} unit(s) short has been escalated to the Owner and the escalation team. The delivery still goes to Remote Office for cost & quantity verification (36h SLA).`,
               },
             })
             return
@@ -108,6 +173,16 @@ export default function DeliveryWizard() {
 
   return (
     <div className="flex min-h-full flex-col bg-canvas">
+      {scanning && (
+        <DocScanner
+          title="Scan invoice"
+          multiPage
+          pageCount={pages.length}
+          onDone={onPageScanned}
+          onFinish={() => setScanning(false)}
+          onClose={() => setScanning(false)}
+        />
+      )}
       <input
         ref={fileRef}
         type="file"
@@ -181,10 +256,79 @@ export default function DeliveryWizard() {
         )}
 
         {step === 1 && (
-          <div>
-            <div className="mb-1 text-[13px] font-semibold">Capture invoice &amp; goods</div>
+          <div className="flex flex-col gap-5">
+            <div>
+              <div className="mb-1 flex items-center justify-between">
+                <span className="text-[13px] font-semibold">Invoice</span>
+                {pages.length > 0 && (
+                  <span className="flex items-center gap-1 text-[11px] font-semibold text-success-deep">
+                    <FilePdf size={14} weight="fill" />
+                    {pages.length} page{pages.length === 1 ? '' : 's'} · one PDF
+                  </span>
+                )}
+              </div>
+              <div className="mb-3 text-xs text-muted">
+                Scan every page of the supplier invoice — they’re combined into a single PDF and
+                filed in the invoice folder.
+              </div>
+              {pages.length === 0 ? (
+                <button
+                  onClick={() => setScanning(true)}
+                  className="flex w-full items-center gap-3 rounded-[14px] border-[1.5px] border-brand/50 bg-brand-tint p-3.5 text-left"
+                >
+                  <div className="flex h-[46px] w-[46px] flex-none items-center justify-center rounded-xl bg-brand">
+                    <Scan size={24} weight="fill" color="#fff" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-sm font-bold">Scan invoice</div>
+                    <div className="mt-px text-[11.5px] text-muted">
+                      Multi-page · auto edge detect · saved as one PDF
+                    </div>
+                  </div>
+                </button>
+              ) : (
+                <div className="grid grid-cols-4 gap-2">
+                  {pages.map((s, i) => (
+                    <div
+                      key={s.id}
+                      className="relative aspect-[3/4] overflow-hidden rounded-[11px] border border-ink/10 bg-white"
+                    >
+                      {s.page ? (
+                        <img src={s.page.dataUrl} alt={`Invoice page ${i + 1}`} className="h-full w-full object-cover object-top" />
+                      ) : (
+                        <div className="flex h-full items-center justify-center">
+                          <CircleNotch size={20} className="animate-spin text-muted" />
+                        </div>
+                      )}
+                      <span className="absolute bottom-1 left-1 rounded-md bg-ink/75 px-1.5 text-[10px] font-bold text-white">
+                        {i + 1}
+                      </span>
+                      {s.page && (
+                        <button
+                          onClick={() => removePage(s.id)}
+                          aria-label={`Remove page ${i + 1}`}
+                          className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-ink/70"
+                        >
+                          <X size={13} weight="bold" color="#fff" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  <button
+                    onClick={() => setScanning(true)}
+                    className="flex aspect-[3/4] flex-col items-center justify-center gap-1 rounded-[11px] border-[1.5px] border-dashed border-brand/50 bg-brand-tint"
+                  >
+                    <Plus size={20} color="#FF5A2D" weight="bold" />
+                    <span className="text-[10px] font-semibold text-brand">Add page</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div>
+            <div className="mb-1 text-[13px] font-semibold">Goods photos</div>
             <div className="mb-3.5 text-xs text-muted">
-              Photograph the invoice and the delivered stock.
+              Photograph the delivered stock.
             </div>
             <div className="grid grid-cols-3 gap-2.5">
               {photos.map((ph, i) => (
@@ -209,36 +353,87 @@ export default function DeliveryWizard() {
                 <span className="text-[10px] font-semibold text-muted">Capture</span>
               </button>
             </div>
+            </div>
           </div>
         )}
 
         {step === 2 && (
           <div className="flex flex-col gap-3.5">
             <div>
-              <label className={label}>Quantity discrepancy (units short)</label>
-              <input
-                value={qty}
-                onChange={(e) => setQty(e.target.value)}
-                inputMode="numeric"
-                placeholder="0"
-                className={inputCls}
-              />
+              <label className={label}>Is there a quantity discrepancy?</label>
+              <div className="grid grid-cols-2 gap-2.5" role="radiogroup" aria-label="Quantity discrepancy">
+                {([
+                  [false, 'No', 'Delivery matches the invoice'],
+                  [true, 'Yes', 'Items short or missing'],
+                ] as const).map(([val, title, sub]) => {
+                  const on = hasDiscrepancy === val
+                  const danger = val
+                  return (
+                    <button
+                      key={title}
+                      role="radio"
+                      aria-checked={on}
+                      onClick={() => setHasDiscrepancy(val)}
+                      className="rounded-xl border-[1.5px] p-3 text-left"
+                      style={{
+                        borderColor: on ? (danger ? '#E5484D' : '#16B364') : 'rgba(21,27,40,.15)',
+                        background: on ? (danger ? '#FDECEC' : '#E8F7EF') : '#fff',
+                      }}
+                    >
+                      <div
+                        className="text-sm font-bold"
+                        style={{ color: on ? (danger ? '#E5484D' : '#0E9152') : '#151B28' }}
+                      >
+                        {title}
+                      </div>
+                      <div className="mt-0.5 text-[11px] text-muted">{sub}</div>
+                    </button>
+                  )
+                })}
+              </div>
             </div>
-            {qtyNum > 0 && (
-              <div className="flex items-center gap-2 rounded-xl bg-warn-soft p-3 text-xs text-amber">
-                <Warning size={16} weight="fill" />
-                Discrepancy &gt; 0 will flag an escalation to the Owner.
+            {hasDiscrepancy && (
+              <>
+                <div>
+                  <label className={label}>
+                    Units short <span className="text-danger">*</span>
+                  </label>
+                  <input
+                    value={qty}
+                    onChange={(e) => setQty(e.target.value.replace(/[^0-9]/g, ''))}
+                    inputMode="numeric"
+                    placeholder="e.g. 6"
+                    className={inputCls}
+                  />
+                </div>
+                <div className="flex items-start gap-2 rounded-xl bg-warn-soft p-3 text-xs text-amber">
+                  <Warning size={16} weight="fill" className="mt-px flex-none" />
+                  This will be escalated to the Owner and the escalation team as soon as you submit.
+                </div>
+              </>
+            )}
+            {hasDiscrepancy !== null && (
+              <div>
+                <label className={label}>
+                  Remarks{' '}
+                  {hasDiscrepancy ? (
+                    <span className="text-danger">*</span>
+                  ) : (
+                    <span className="font-normal text-muted">(optional)</span>
+                  )}
+                </label>
+                <textarea
+                  value={remarks}
+                  onChange={(e) => setRemarks(e.target.value)}
+                  placeholder={
+                    hasDiscrepancy
+                      ? 'What is short or missing? e.g. 6 × Coke 500ml missing from case'
+                      : 'Anything unusual about this delivery…'
+                  }
+                  className="h-[90px] w-full resize-none rounded-xl border-[1.5px] border-ink/15 bg-white p-3 text-sm outline-none focus:border-brand"
+                />
               </div>
             )}
-            <div>
-              <label className={label}>Remarks</label>
-              <textarea
-                value={remarks}
-                onChange={(e) => setRemarks(e.target.value)}
-                placeholder="Anything unusual about this delivery…"
-                className="h-[90px] w-full resize-none rounded-xl border-[1.5px] border-ink/15 bg-white p-3 text-sm outline-none focus:border-brand"
-              />
-            </div>
           </div>
         )}
 
@@ -250,7 +445,13 @@ export default function DeliveryWizard() {
                 {[
                   ['Supplier', supplier],
                   ['Invoice', invoice ? `#${invoice}` : '—'],
-                  ['Photos', `${photos.length} captured`],
+                  [
+                    'Invoice scan',
+                    pages.length
+                      ? `${pages.length}-page PDF${pagesProcessing ? ' (processing…)' : ''}`
+                      : 'Not scanned',
+                  ],
+                  ['Goods photos', `${photos.length} captured`],
                 ].map(([k, v]) => (
                   <div key={k} className="flex justify-between">
                     <span className="text-muted">{k}</span>
@@ -259,10 +460,16 @@ export default function DeliveryWizard() {
                 ))}
                 <div className="flex justify-between">
                   <span className="text-muted">Discrepancy</span>
-                  <span className="font-semibold" style={{ color: qtyNum > 0 ? '#E5484D' : '#151B28' }}>
-                    {qtyNum > 0 ? `${qtyNum} short` : 'None'}
+                  <span className="font-semibold" style={{ color: unitsShort > 0 ? '#E5484D' : '#151B28' }}>
+                    {unitsShort > 0 ? `Yes · ${unitsShort} short` : 'No'}
                   </span>
                 </div>
+                {remarks.trim() && (
+                  <div className="flex justify-between gap-4">
+                    <span className="flex-none text-muted">Remarks</span>
+                    <span className="text-right font-semibold [overflow-wrap:anywhere]">{remarks.trim()}</span>
+                  </div>
+                )}
                 <div className="flex justify-between border-t border-ink/5 pt-2">
                   <span className="text-muted">Location</span>
                   <span
@@ -280,9 +487,12 @@ export default function DeliveryWizard() {
               </div>
               {[
                 { n: 1, text: 'You submit — record created', done: true },
-                { n: 2, text: 'Remote Office verifies cost & quantity (36h SLA)' },
-                { n: 3, text: 'Owner approves → archived for EPOS' },
-              ].map((s, i) => (
+                ...(unitsShort > 0
+                  ? [{ n: 2, text: 'Discrepancy escalated to the Owner & escalation team', alert: true }]
+                  : []),
+                { n: unitsShort > 0 ? 3 : 2, text: 'Remote Office verifies cost & quantity (36h SLA)' },
+                { n: unitsShort > 0 ? 4 : 3, text: 'Owner approves → archived for EPOS' },
+              ].map((s: { n: number; text: string; done?: boolean; alert?: boolean }, i) => (
                 <div key={s.n}>
                   {i > 0 && <div className="ml-3 h-3.5 w-0.5 bg-[#c9d6f0]" />}
                   <div className="flex items-center gap-2.5">
@@ -291,11 +501,15 @@ export default function DeliveryWizard() {
                       style={
                         s.done
                           ? { background: '#16B364' }
-                          : { background: '#fff', border: '2px solid #93b4f0' }
+                          : s.alert
+                            ? { background: '#E5484D' }
+                            : { background: '#fff', border: '2px solid #93b4f0' }
                       }
                     >
                       {s.done ? (
                         <Check size={13} weight="bold" color="#fff" />
+                      ) : s.alert ? (
+                        <Warning size={13} weight="fill" color="#fff" />
                       ) : (
                         <span className="text-[11px] font-bold text-[#2563EB]">{s.n}</span>
                       )}
@@ -322,12 +536,25 @@ export default function DeliveryWizard() {
           onRetry={retry}
           tone={blocked ? 'danger' : 'warn'}
         />
+        {step === 2 && discrepancyMissing && (
+          <div className="mb-2 text-center text-[11.5px] font-medium text-muted">{discrepancyMissing}</div>
+        )}
         <button
           onClick={next}
-          disabled={submit.isPending || (step === 3 && blocked)}
+          disabled={
+            submit.isPending ||
+            (step === 2 && !!discrepancyMissing) ||
+            (step === 3 && (blocked || pagesProcessing))
+          }
           className="w-full rounded-[13px] bg-brand p-[15px] text-[15px] font-bold text-white disabled:opacity-60"
         >
-          {step < 3 ? 'Continue' : blocked ? 'Blocked — outside geofence' : 'Submit delivery'}
+          {step < 3
+            ? 'Continue'
+            : blocked
+              ? 'Blocked — outside geofence'
+              : submit.isPending
+                ? 'Submitting…'
+                : 'Submit delivery'}
         </button>
       </div>
     </div>

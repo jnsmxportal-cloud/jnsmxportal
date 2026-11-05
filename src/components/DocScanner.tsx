@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Camera, Check, Image as ImageIcon, X } from '@phosphor-icons/react'
+import { ArrowRight, Camera, Check, Image as ImageIcon, X } from '@phosphor-icons/react'
 import {
   defaultQuad,
   detectDocumentQuad,
@@ -14,16 +14,27 @@ import {
  * Full-screen document scanner: live camera with automatic edge detection and
  * auto-capture, then a 4-corner adjustment step with perspective correction.
  * Falls back to a gallery import when the camera is unavailable.
+ *
+ * Multi-page mode (`multiPage`): each accepted scan is handed to `onDone` and
+ * the camera re-opens for the next page; `onFinish` ends the session.
  */
 export default function DocScanner({
   onDone,
   onClose,
   title = 'Scan document',
+  multiPage = false,
+  pageCount = 0,
+  onFinish,
 }: {
-  /** Receives the perspective-corrected scan as a JPEG data URL. */
+  /** Receives the perspective-corrected scan as a JPEG data URL (once per page in multi-page mode). */
   onDone: (dataUrl: string) => void
   onClose: () => void
   title?: string
+  multiPage?: boolean
+  /** Pages already captured in this session (multi-page mode). */
+  pageCount?: number
+  /** Multi-page mode: called when the user is done adding pages. */
+  onFinish?: () => void
 }) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
@@ -33,6 +44,11 @@ export default function DocScanner({
   const stableSinceRef = useRef<number | null>(null)
   const lastQuadRef = useRef<Quad | null>(null)
   const capturedRef = useRef(false)
+  // multi-page: auto-capture stays disarmed for a moment after a page is
+  // accepted, so the same sheet is not captured again before it is turned
+  const armAtRef = useRef(0)
+  const turnPageRef = useRef(false)
+  const [turnPage, setTurnPage] = useState(false)
 
   const [mode, setMode] = useState<'camera' | 'adjust'>('camera')
   const [cameraError, setCameraError] = useState<string | null>(null)
@@ -136,7 +152,12 @@ export default function DocScanner({
 
       // auto-capture when the detected quad stays put for ~1.2s
       const HOLD_MS = 1200
-      if (q && lastQuadRef.current && quadDrift(q, lastQuadRef.current) < 6) {
+      const armed = performance.now() >= armAtRef.current
+      if (armed && turnPageRef.current) {
+        turnPageRef.current = false
+        setTurnPage(false)
+      }
+      if (armed && q && lastQuadRef.current && quadDrift(q, lastQuadRef.current) < 6) {
         if (!stableSinceRef.current) stableSinceRef.current = ts
         const held = ts - stableSinceRef.current
         setHoldPct(Math.min(1, held / HOLD_MS))
@@ -236,7 +257,14 @@ export default function DocScanner({
     }
   }
 
-  const confirm = () => {
+  const backToCamera = () => {
+    frameRef.current = null
+    setQuad(null)
+    setMode('camera')
+  }
+
+  /** Accept the adjusted scan. In multi-page mode `then` says whether another page follows. */
+  const confirm = (then: 'next' | 'finish' = 'finish') => {
     if (!frameRef.current || !quad || busy) return
     setBusy(true)
     // let the busy state paint before the (sync, heavy) warp
@@ -244,6 +272,15 @@ export default function DocScanner({
       try {
         const warped = warpPerspective(frameRef.current!, quad)
         onDone(warped.toDataURL('image/jpeg', 0.92))
+        if (!multiPage) return
+        if (then === 'finish') {
+          onFinish?.()
+          return
+        }
+        armAtRef.current = performance.now() + 2500
+        turnPageRef.current = true
+        setTurnPage(true)
+        backToCamera()
       } finally {
         setBusy(false)
       }
@@ -304,7 +341,14 @@ export default function DocScanner({
       />
       {/* header */}
       <div className="flex items-center justify-between px-4 py-3">
-        <span className="text-sm font-bold text-white">{title}</span>
+        <span className="text-sm font-bold text-white">
+          {title}
+          {multiPage && (
+            <span className="ml-2 rounded-full bg-white/15 px-2 py-0.5 text-[11px] font-semibold text-white/85">
+              Page {pageCount + 1}
+            </span>
+          )}
+        </span>
         <button onClick={onClose} className="rounded-full bg-white/10 p-2 text-white">
           <X size={18} />
         </button>
@@ -325,9 +369,11 @@ export default function DocScanner({
                 <canvas ref={overlayRef} className="pointer-events-none absolute inset-0 h-full w-full" />
                 <div className="pointer-events-none absolute inset-x-0 top-3 text-center">
                   <span className="rounded-full bg-black/55 px-3 py-1.5 text-[12px] font-semibold text-white">
-                    {holdPct > 0
-                      ? `Hold still… ${Math.round(holdPct * 100)}%`
-                      : 'Position the document in view'}
+                    {turnPage
+                      ? `Page ${pageCount} added · turn to the next page`
+                      : holdPct > 0
+                        ? `Hold still… ${Math.round(holdPct * 100)}%`
+                        : 'Position the document in view'}
                   </span>
                 </div>
               </>
@@ -360,7 +406,19 @@ export default function DocScanner({
               aria-label="Capture"
               className="h-[68px] w-[68px] rounded-full border-4 border-white bg-brand disabled:opacity-40"
             />
-            <span className="w-[46px]" />
+            {multiPage && pageCount > 0 ? (
+              <button
+                onClick={onFinish}
+                className="flex flex-col items-center gap-1 text-[11px] font-semibold text-white/85"
+              >
+                <span className="rounded-full bg-success p-3">
+                  <Check size={22} weight="bold" color="#fff" />
+                </span>
+                Done ({pageCount})
+              </button>
+            ) : (
+              <span className="w-[46px]" />
+            )}
           </div>
         </>
       )}
@@ -409,25 +467,47 @@ export default function DocScanner({
           <div className="px-4 pb-1 text-center text-[11.5px] text-white/60">
             Drag the corners to match the document edges
           </div>
-          <div className="flex items-center justify-center gap-3 p-4">
-            <button
-              onClick={() => {
-                frameRef.current = null
-                setQuad(null)
-                setMode('camera')
-              }}
-              className="rounded-xl border border-white/25 px-5 py-3 text-[13.5px] font-semibold text-white"
-            >
-              Retake
-            </button>
-            <button
-              onClick={confirm}
-              disabled={busy}
-              className="flex items-center gap-2 rounded-xl bg-brand px-6 py-3 text-[13.5px] font-bold text-white disabled:opacity-60"
-            >
-              <Check size={17} weight="bold" /> {busy ? 'Processing…' : 'Use scan'}
-            </button>
-          </div>
+          {multiPage ? (
+            <div className="flex items-center justify-center gap-2 p-4">
+              <button
+                onClick={backToCamera}
+                disabled={busy}
+                className="rounded-xl border border-white/25 px-4 py-3 text-[13px] font-semibold text-white disabled:opacity-60"
+              >
+                Retake
+              </button>
+              <button
+                onClick={() => confirm('next')}
+                disabled={busy}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-brand bg-brand/15 px-3 py-3 text-[13px] font-bold text-white disabled:opacity-60"
+              >
+                {busy ? 'Processing…' : 'Next page'} <ArrowRight size={15} weight="bold" />
+              </button>
+              <button
+                onClick={() => confirm('finish')}
+                disabled={busy}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-brand px-3 py-3 text-[13px] font-bold text-white disabled:opacity-60"
+              >
+                <Check size={15} weight="bold" /> {pageCount > 0 ? 'Last page' : 'Done'}
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-center gap-3 p-4">
+              <button
+                onClick={backToCamera}
+                className="rounded-xl border border-white/25 px-5 py-3 text-[13.5px] font-semibold text-white"
+              >
+                Retake
+              </button>
+              <button
+                onClick={() => confirm()}
+                disabled={busy}
+                className="flex items-center gap-2 rounded-xl bg-brand px-6 py-3 text-[13.5px] font-bold text-white disabled:opacity-60"
+              >
+                <Check size={17} weight="bold" /> {busy ? 'Processing…' : 'Use scan'}
+              </button>
+            </div>
+          )}
         </>
       )}
     </div>

@@ -11,9 +11,24 @@ import { EvidencePhoto, useNames } from './shared'
 import { useDeliveryEvidence } from '../../data/ownerExtras'
 import type { Delivery } from '../../lib/types'
 
+/** Open a PDF from the `invoices` bucket via a short-lived signed URL. */
+function useOpenInvoicePdf() {
+  const toast = useToast()
+  return async (path: string | null) => {
+    if (!path) return
+    const { data, error } = await supabase.storage.from('invoices').createSignedUrl(path, 300)
+    if (error || !data?.signedUrl) {
+      toast('Could not open the PDF', 'error')
+      return
+    }
+    window.open(data.signedUrl, '_blank')
+  }
+}
+
 function VerifyModal({ delivery, onClose }: { delivery: Delivery; onClose: () => void }) {
   const verify = useVerifyDelivery()
   const toast = useToast()
+  const openPdf = useOpenInvoicePdf()
   const { data: evidence } = useDeliveryEvidence(delivery.id)
   const photos = (evidence ?? []).filter((e) => e.type === 'photo' && e.storage_path)
   const [cost, setCost] = useState((delivery.cost ?? delivery.invoice_total)?.toString() ?? '')
@@ -40,6 +55,28 @@ function VerifyModal({ delivery, onClose }: { delivery: Delivery; onClose: () =>
           {delivery.supplier} · Inv #{delivery.invoice_no} — Remote Office step: confirm cost &amp;
           quantity, then it goes to the Owner for approval.
         </div>
+        <label className={label}>Invoice scan</label>
+        {delivery.invoice_pdf_path ? (
+          <button
+            onClick={() => openPdf(delivery.invoice_pdf_path)}
+            className="mb-3 flex w-full items-center gap-2.5 rounded-[10px] border border-ink/15 px-3 py-2.5 text-left"
+          >
+            <FilePdf size={20} weight="fill" color="#DB2777" />
+            <span className="flex-1 text-[12.5px] font-semibold">
+              Invoice{delivery.invoice_no ? ` #${delivery.invoice_no}` : ''}
+              {delivery.invoice_pages ? (
+                <span className="font-normal text-muted">
+                  {' '}· {delivery.invoice_pages} page{delivery.invoice_pages === 1 ? '' : 's'}
+                </span>
+              ) : null}
+            </span>
+            <span className="text-[11.5px] font-semibold text-brand">Open PDF</span>
+          </button>
+        ) : (
+          <div className="mb-3 rounded-[10px] border border-dashed border-ink/15 px-3 py-2.5 text-[11.5px] text-muted">
+            No invoice scanned with this delivery
+          </div>
+        )}
         <label className={label}>Goods photos from the store</label>
         {photos.length > 0 ? (
           <div className="mb-3 flex flex-wrap gap-2">
@@ -105,16 +142,7 @@ function VerifyModal({ delivery, onClose }: { delivery: Delivery; onClose: () =>
 function InvoiceFolder({ storeId }: { storeId: string | 'all' }) {
   const { data: invoices } = useInvoices(storeId)
   const { storeName, userName } = useNames()
-  const toast = useToast()
-  const open = async (path: string | null) => {
-    if (!path) return
-    const { data, error } = await supabase.storage.from('invoices').createSignedUrl(path, 300)
-    if (error || !data?.signedUrl) {
-      toast('Could not open the PDF', 'error')
-      return
-    }
-    window.open(data.signedUrl, '_blank')
-  }
+  const open = useOpenInvoicePdf()
   return (
     <Card className="mt-5 max-w-[980px] overflow-hidden">
       <div className="flex items-center gap-2 border-b border-ink/5 px-5 py-[15px]">
@@ -159,6 +187,7 @@ export default function DeliveriesPage() {
   const review = useReviewDelivery()
   const toast = useToast()
   const canAct = can('deliveries.verify')
+  const openPdf = useOpenInvoicePdf()
   const [verifying, setVerifying] = useState<Delivery | null>(null)
 
   return (
@@ -185,7 +214,19 @@ export default function DeliveriesPage() {
           >
             <span className="font-semibold">{d.supplier}</span>
             <span className="text-slate">{storeName(d.store_id)}</span>
-            <span className="font-mono text-slate">#{d.invoice_no}</span>
+            <span className="flex items-center gap-1.5 font-mono text-slate">
+              {d.invoice_no ? `#${d.invoice_no}` : '—'}
+              {d.invoice_pdf_path && (
+                <button
+                  onClick={() => openPdf(d.invoice_pdf_path)}
+                  title={`Open invoice PDF${d.invoice_pages ? ` (${d.invoice_pages} page${d.invoice_pages === 1 ? '' : 's'})` : ''}`}
+                  aria-label="Open invoice PDF"
+                  className="rounded-md p-0.5 text-[#DB2777] hover:bg-[#DB2777]/10"
+                >
+                  <FilePdf size={16} weight="fill" />
+                </button>
+              )}
+            </span>
             <span
               style={{
                 color: d.discrepancy_units > 0 ? '#E5484D' : '#8B93A4',

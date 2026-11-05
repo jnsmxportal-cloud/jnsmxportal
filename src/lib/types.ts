@@ -144,6 +144,9 @@ export interface Delivery {
   submitted_at: string
   review_due_at: string | null
   geofence_verdict: string | null
+  /** Consolidated invoice scan in the `invoices` bucket (multi-page PDF). */
+  invoice_pdf_path: string | null
+  invoice_pages: number | null
 }
 
 export interface Invoice {

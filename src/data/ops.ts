@@ -1,6 +1,8 @@
 import Dexie, { type Table } from 'dexie'
 import { supabase, ORG_ID } from '../lib/supabase'
 import { triggerFanout } from '../lib/push'
+import { invoicePdfPath as invoicePdfPathFor } from '../lib/invoicePdf'
+import { effectivePermissions, type PermissionKey, type Role } from './roles'
 import type { AppNotification, AppRole, StoreUnit, TaskInstance } from '../lib/types'
 
 // ---------- shared notification/audit helpers ----------
@@ -52,6 +54,38 @@ export async function reviewerProfiles(roles: AppRole[]): Promise<{ id: string; 
 
 export async function reviewers(roles: AppRole[]): Promise<string[]> {
   return (await reviewerProfiles(roles)).map((p) => p.id)
+}
+
+/**
+ * Who handles escalations for a store: every owner, plus everyone whose role has `perm`
+ * switched on (Admin → Roles). Store-scoped base roles (team leader, remote office, staff)
+ * only count for stores they belong to — they couldn't open the escalation otherwise.
+ * Falls back to the owners alone if the lookup fails.
+ */
+export async function permissionHolders(
+  perm: PermissionKey,
+  storeId: string,
+): Promise<{ id: string; role: AppRole }[]> {
+  const [profilesRes, rolesRes, membersRes] = await Promise.all([
+    supabase.from('profiles').select('id, role, role_id'),
+    supabase.from('roles').select('*'),
+    supabase.from('user_store_roles').select('user_id').eq('store_id', storeId),
+  ])
+  const err = profilesRes.error ?? rolesRes.error ?? membersRes.error
+  if (err) {
+    console.warn('escalation recipients: lookup failed —', err.message)
+    return reviewerProfiles(['owner'])
+  }
+  const roles = new Map(((rolesRes.data ?? []) as Role[]).map((r) => [r.id, r]))
+  const members = new Set(((membersRes.data ?? []) as { user_id: string }[]).map((m) => m.user_id))
+  return ((profilesRes.data ?? []) as { id: string; role: AppRole; role_id: string | null }[])
+    .filter((p) => {
+      if (p.role === 'owner') return true
+      const role = p.role_id ? roles.get(p.role_id) ?? null : null
+      if (!effectivePermissions(role, p.role).has(perm)) return false
+      return p.role === 'manager' || members.has(p.id)
+    })
+    .map(({ id, role }) => ({ id, role }))
 }
 
 /** Deep link appropriate for a recipient's role (staff / team leaders can't open /owner/*). */
@@ -248,13 +282,31 @@ export interface DeliveryArgs {
   photoCount: number
   photos: Blob[]
   geofenceVerdict: string
+  /** Scanned invoice pages consolidated into one PDF (optional; older queued ops lack it). */
+  invoicePdf?: Blob | null
+  invoicePages?: number
+  /** Used for the invoice-folder path (store / supplier / month). */
+  storeName?: string
 }
 
 export async function submitDeliveryCore(uid: string, args: DeliveryArgs, deviceTs?: string) {
   const ts = deviceTs ?? new Date().toISOString()
+  // Invoice PDF first, so the delivery row can point at it. Filed in the invoice folder
+  // exactly like Invoice Upload; the timestamped path stays unique on an offline retry.
+  let invoicePdfPath: string | null = null
+  if (args.invoicePdf) {
+    const { path } = invoicePdfPathFor(args.storeName || args.storeId, args.supplier, args.invoiceNo)
+    const { error: pdfError } = await supabase.storage
+      .from('invoices')
+      .upload(path, args.invoicePdf, { contentType: 'application/pdf' })
+    if (pdfError) throw pdfError
+    invoicePdfPath = path
+  }
   const { data, error } = await supabase
     .from('deliveries')
     .insert({
+      invoice_pdf_path: invoicePdfPath,
+      invoice_pages: invoicePdfPath ? args.invoicePages ?? null : null,
       org_id: ORG_ID,
       store_id: args.storeId,
       supplier: args.supplier,
@@ -272,6 +324,20 @@ export async function submitDeliveryCore(uid: string, args: DeliveryArgs, device
     .single()
   if (error) throw error
   const deliveryId = (data as { id: string }).id
+  if (invoicePdfPath) {
+    // secondary write: the delivery already points at the PDF, so a failure here only
+    // costs the Invoice-folder listing — never fail (and so duplicate) the delivery for it
+    const { error: invError } = await supabase.from('invoices').insert({
+      org_id: ORG_ID,
+      store_id: args.storeId,
+      supplier: args.supplier,
+      invoice_no: args.invoiceNo || null,
+      invoice_date: ts.slice(0, 10),
+      pdf_path: invoicePdfPath,
+      uploaded_by: uid,
+    })
+    if (invError) console.warn('[delivery] invoice folder entry failed', invError)
+  }
   for (let i = 0; i < args.photos.length; i++) {
     const path = `${ORG_ID}/deliveries/${deliveryId}/${Date.now()}-${i}.jpg`
     const { error: uploadError } = await supabase.storage
@@ -299,23 +365,45 @@ export async function submitDeliveryCore(uid: string, args: DeliveryArgs, device
       stage: 'owner',
       status: 'open',
       delivery_id: deliveryId,
+      action_due_at: new Date(Date.now() + 24 * 3600e3).toISOString(),
     })
     if (escError) throw escError
+    // "Yes" to a discrepancy: alert the owner(s) + everyone with the escalation permission
+    const recips = await permissionHolders('escalations.resolve', args.storeId)
+    await notify(
+      recips.map((p) => ({
+        id: p.id,
+        deep_link: roleLink(p.role, { mgmt: '/owner/escalations', team_leader: '/leader' }),
+      })),
+      {
+        org_id: ORG_ID,
+        type: 'escalation',
+        title: `Delivery discrepancy — ${args.supplier}${args.invoiceNo ? ` (Inv #${args.invoiceNo})` : ''}`,
+        body: `${args.discrepancy} unit(s) short. ${args.remarks || ''}`.trim().slice(0, 160),
+        deep_link: '/owner/escalations',
+        icon: 'warning-octagon',
+      } as never,
+    )
   }
-  await notify(await reviewers(['owner', 'remote_office']), {
-    org_id: ORG_ID,
-    type: 'delivery',
-    title: `Delivery logged — ${args.supplier}`,
-    body:
-      args.discrepancy > 0
-        ? `Quantity discrepancy: ${args.discrepancy} short`
-        : 'Awaiting Remote Office review (36h SLA)',
-    deep_link: '/owner/deliveries',
-    icon: 'truck',
-  } as never)
+  // Remote Office always verifies; the owner already has the escalation when there's a discrepancy
+  await notify(
+    await reviewers(args.discrepancy > 0 ? ['remote_office'] : ['owner', 'remote_office']),
+    {
+      org_id: ORG_ID,
+      type: 'delivery',
+      title: `Delivery logged — ${args.supplier}`,
+      body:
+        args.discrepancy > 0
+          ? `Quantity discrepancy: ${args.discrepancy} short`
+          : 'Awaiting Remote Office review (36h SLA)',
+      deep_link: '/owner/deliveries',
+      icon: 'truck',
+    } as never,
+  )
   await audit(uid, 'delivery.submitted', 'delivery', deliveryId, {
     discrepancy: args.discrepancy,
     photos: args.photos.length,
+    invoice_pages: invoicePdfPath ? args.invoicePages ?? null : 0,
   })
   return { queued: false }
 }

@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, CircleNotch, FilePdf, Receipt, Scan } from '@phosphor-icons/react'
 import { format } from 'date-fns'
-import { jsPDF } from 'jspdf'
 import { supabase, ORG_ID } from '../../lib/supabase'
 import { useAuth } from '../../auth/AuthProvider'
 import { useInvoices } from '../../data/hooks'
@@ -12,44 +11,9 @@ import { timeAgo } from '../../lib/format'
 import { useToast } from '../../components/Toast'
 import DocScanner from '../../components/DocScanner'
 import { useStaffStore } from './StaffShell'
+import { buildInvoicePdf, enhanceScan, invoicePdfPath } from '../../lib/invoicePdf'
 
 const suppliers = ['Booker', 'Coca-Cola Enterprises', 'Nisa', 'Bestway', 'Other']
-
-/** FR-4.1a: enhance a scan for archive legibility (grayscale, contrast stretch). */
-async function enhanceScan(dataUrl: string): Promise<{ dataUrl: string; w: number; h: number }> {
-  const img = await new Promise<HTMLImageElement>((res, rej) => {
-    const el = new Image()
-    el.onload = () => res(el)
-    el.onerror = () => rej(new Error('Could not read the scanned image'))
-    el.src = dataUrl
-  })
-  const maxSide = 1600
-  const scale = Math.min(1, maxSide / Math.max(img.width, img.height))
-  const w = Math.round(img.width * scale)
-  const h = Math.round(img.height * scale)
-  const canvas = document.createElement('canvas')
-  canvas.width = w
-  canvas.height = h
-  const ctx = canvas.getContext('2d')!
-  ctx.drawImage(img, 0, 0, w, h)
-  const data = ctx.getImageData(0, 0, w, h)
-  const px = data.data
-  let min = 255
-  let max = 0
-  for (let i = 0; i < px.length; i += 4) {
-    const g = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2]
-    if (g < min) min = g
-    if (g > max) max = g
-  }
-  const range = Math.max(1, max - min)
-  for (let i = 0; i < px.length; i += 4) {
-    const g = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2]
-    const v = Math.min(255, Math.max(0, ((g - min) / range) * 255 * 1.08))
-    px[i] = px[i + 1] = px[i + 2] = v
-  }
-  ctx.putImageData(data, 0, 0)
-  return { dataUrl: canvas.toDataURL('image/jpeg', 0.85), w, h }
-}
 
 export default function InvoiceUpload() {
   const navigate = useNavigate()
@@ -95,22 +59,8 @@ export default function InvoiceUpload() {
     }
     setBusy(true)
     try {
-      const pdf = new jsPDF({ unit: 'mm', format: 'a4' })
-      // fit within A4 margins, preserving the scan's aspect ratio
-      const availW = 194
-      const availH = 281
-      let wMM = availW
-      let hMM = (availW * preview.h) / preview.w
-      if (hMM > availH) {
-        hMM = availH
-        wMM = (availH * preview.w) / preview.h
-      }
-      pdf.addImage(preview.dataUrl, 'JPEG', 8 + (availW - wMM) / 2, 8, wMM, hMM)
-      const blob = pdf.output('blob')
-      // filed by store / supplier / month (FR-6.6); timestamp suffix keeps paths unique
-      const month = format(new Date(), 'yyyy-MM')
-      const safe = (s: string) => s.replace(/[^a-zA-Z0-9-_]/g, '_')
-      const path = `${safe(store.name)}/${safe(supplier)}/${month}/${safe(invoiceNo || 'scan')}-${Date.now()}.pdf`
+      const blob = buildInvoicePdf([preview])
+      const { month, path } = invoicePdfPath(store.name, supplier, invoiceNo)
       const { error: upErr } = await supabase.storage.from('invoices').upload(path, blob, {
         contentType: 'application/pdf',
       })
