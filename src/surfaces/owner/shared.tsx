@@ -178,22 +178,27 @@ export function EvidenceGallery({ instanceId }: { instanceId: string }) {
   const signatures = rows.filter((e) => e.type === 'signature' && e.storage_path)
   const temps = rows.filter((e) => e.type === 'metadata')
   const qrs = rows.filter((e) => e.type === 'qr')
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      {photos.map((e) => (
-        <EvidencePhoto key={e.id} ev={e} />
-      ))}
-      {signatures.map((e) => (
-        <EvidencePhoto key={e.id} ev={e} />
-      ))}
-      {temps.map((e) => {
+
+  // a temperature log writes every reading, unit photo and QR row of one submission with the same
+  // device_ts, so that timestamp separates the rounds of a reopened / rejected log
+  const roundOf = (e: EvidenceRow) => e.device_ts
+  const rounds = [...new Set(temps.map(roundOf))].sort().reverse() // newest first
+  // QR rows from a log that has readings belong to a round; any others are listed as before
+  const looseQrs = qrs.filter((q) => !rounds.includes(roundOf(q)))
+
+  const readingChips = (round: string, faded: boolean) =>
+    temps
+      .filter((e) => roundOf(e) === round)
+      .map((e) => {
         const m = (e.metadata ?? {}) as { unit?: string; unit_id?: string; value?: number; breach?: boolean }
-        const photo = unitPhotos.find((p) => unitKey(p) === (m.unit_id ?? m.unit))
+        const key = m.unit_id ?? m.unit
+        // the display photo taken in the same submission as this reading
+        const photo = unitPhotos.find((p) => roundOf(p) === round && unitKey(p) === key)
         const chip = (
           <span
             className={`flex items-center gap-1.5 rounded-[9px] px-2.5 py-[7px] text-[11.5px] font-semibold ${
               m.breach ? 'bg-danger-soft text-danger' : 'bg-canvas text-slate'
-            }`}
+            } ${faded ? 'opacity-70' : ''}`}
           >
             <Thermometer size={13} weight="fill" color={m.breach ? '#E5484D' : '#16B364'} />
             {m.unit ?? 'Unit'} · {m.value ?? '—'}°C{m.breach ? ' · BREACH' : ''}
@@ -210,27 +215,75 @@ export function EvidenceGallery({ instanceId }: { instanceId: string }) {
             {chip}
           </span>
         )
-      })}
-      {qrs.map((e) => {
-        const m = (e.metadata ?? {}) as { payload?: string; unit?: string }
-        return (
-          <span
-            key={e.id}
-            title={m.payload}
-            className="flex max-w-[220px] items-center gap-1.5 rounded-[9px] bg-info-soft px-2.5 py-[7px] text-[11.5px] font-semibold text-[#2563EB]"
-          >
-            <QrCode size={13} weight="fill" /> {m.unit ? `${m.unit} · QR verified` : 'QR verified'}
-            {!m.unit && m.payload && (
-              <span className="truncate font-mono text-[10px] font-normal">{m.payload}</span>
-            )}
-          </span>
-        )
-      })}
+      })
+
+  const qrChip = (e: EvidenceRow) => {
+    const m = (e.metadata ?? {}) as { payload?: string; unit?: string }
+    return (
+      <span
+        key={e.id}
+        title={m.payload}
+        className="flex max-w-[220px] items-center gap-1.5 rounded-[9px] bg-info-soft px-2.5 py-[7px] text-[11.5px] font-semibold text-[#2563EB]"
+      >
+        <QrCode size={13} weight="fill" /> {m.unit ? `${m.unit} · QR verified` : 'QR verified'}
+        {!m.unit && m.payload && <span className="truncate font-mono text-[10px] font-normal">{m.payload}</span>}
+      </span>
+    )
+  }
+
+  const stamp = (iso: string) =>
+    new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+
+  const other = (
+    <>
+      {photos.map((e) => (
+        <EvidencePhoto key={e.id} ev={e} />
+      ))}
+      {signatures.map((e) => (
+        <EvidencePhoto key={e.id} ev={e} />
+      ))}
+      {looseQrs.map(qrChip)}
       {signatures.length > 0 && (
         <span className="flex items-center gap-1 text-[10.5px] font-semibold text-success">
           <Signature size={13} weight="bold" /> Signed
         </span>
       )}
+    </>
+  )
+
+  // one submission (the usual case): everything in a single row, as before
+  if (rounds.length <= 1)
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        {other}
+        {rounds[0] && readingChips(rounds[0], false)}
+        {rounds[0] && qrs.filter((q) => roundOf(q) === rounds[0]).map(qrChip)}
+      </div>
+    )
+
+  // several submissions: newest first, each labelled, earlier ones muted
+  return (
+    <div className="flex flex-col gap-2.5">
+      {(photos.length > 0 || signatures.length > 0 || looseQrs.length > 0) && (
+        <div className="flex flex-wrap items-center gap-2">{other}</div>
+      )}
+      {rounds.map((round, i) => (
+        <div
+          key={round}
+          className={`rounded-xl border p-2.5 ${i === 0 ? 'border-line bg-white' : 'border-dashed border-ink/15 bg-canvas/60'}`}
+        >
+          <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide">
+            <span className={i === 0 ? 'text-ink' : 'text-muted'}>
+              {i === 0 ? 'Latest submission' : `Earlier submission ${rounds.length - i}`}
+            </span>
+            <span className="font-medium normal-case tracking-normal text-muted">· {stamp(round)}</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {readingChips(round, i > 0)}
+            {qrs.filter((q) => roundOf(q) === round).map(qrChip)}
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
