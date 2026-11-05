@@ -27,7 +27,8 @@ import {
 } from '../../data/taskAdmin'
 import { dueLabel, timeAgo } from '../../lib/format'
 import type { TaskInstance, TaskPriority } from '../../lib/types'
-import { taskStatusStyle as statusStyle, useKindMeta, useNames } from './shared'
+import { statusStyleOf, taskStatusStyle as statusStyle, useKindMeta, useNames } from './shared'
+import { TaskDetailModal } from './TaskDetailModal'
 
 /**
  * Admin → Tasks: every task instance in the org (scheduler-generated, one-off, Run now and
@@ -111,6 +112,7 @@ export default function TasksPanel() {
   const [age, setAge] = useState<AgeFilter>('any')
   const [editing, setEditing] = useState<TaskInstance | null>(null)
   const [deleting, setDeleting] = useState<TaskInstance | null>(null)
+  const [viewing, setViewing] = useState<TaskInstance | null>(null)
   // tidy-up: ticked task ids, and the bulk action being confirmed
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
   const [bulk, setBulk] = useState<{ action: 'cancel' | 'delete'; tasks: TaskInstance[] } | null>(null)
@@ -301,7 +303,7 @@ export default function TasksPanel() {
         )}
         {list.map((t) => {
           const { Icon, c, b } = kindMeta(t)
-          const st = statusStyle[t.status] ?? statusStyle.assigned
+          const st = statusStyleOf(t)
           const due = dueLabel(t)
           const open = isOpenStatus(t.status)
           const showDue = open || t.status === 'missed'
@@ -325,7 +327,13 @@ export default function TasksPanel() {
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="font-display text-sm font-bold">{t.title}</span>
+                  <button
+                    onClick={() => setViewing(t)}
+                    title="Open the task: checklist, evidence and full history"
+                    className="text-left font-display text-sm font-bold hover:text-brand"
+                  >
+                    {t.title}
+                  </button>
                   <PrioBadge p={t.priority} />
                   <span
                     className="rounded-full px-2 py-px text-[10px] font-bold"
@@ -424,6 +432,7 @@ export default function TasksPanel() {
 
       {editing && <TaskEditModal task={editing} onClose={() => setEditing(null)} />}
       {deleting && <DeleteTaskModal task={deleting} onClose={() => setDeleting(null)} />}
+      {viewing && <TaskDetailModal task={viewing} onClose={() => setViewing(null)} />}
       {bulk && (
         <BulkTaskModal
           action={bulk.action}

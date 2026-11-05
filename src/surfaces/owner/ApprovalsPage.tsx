@@ -5,7 +5,14 @@ import { useTasks } from '../../data/hooks'
 import type { TaskInstance } from '../../lib/types'
 import { timeAgo } from '../../lib/format'
 import { useOwnerCtx } from './OwnerLayout'
-import { ApprovalActions, EvidenceGallery, evidenceSummary, useKindMeta, useNames } from './shared'
+import {
+  ApprovalActions,
+  EvidenceGallery,
+  evidenceSummary,
+  ResubmissionNote,
+  useKindMeta,
+  useNames,
+} from './shared'
 import { TaskDetailModal } from './TaskDetailModal'
 
 export default function ApprovalsPage() {
@@ -52,6 +59,7 @@ export default function ApprovalsPage() {
                 {storeName(t.store_id)} · Submitted by {userName(t.submitted_by)} ·{' '}
                 {t.submitted_at ? timeAgo(t.submitted_at) : ''}
               </div>
+              <ResubmissionNote task={t} />
               <div className="mb-3 text-[12.5px] text-slate">{evidenceSummary(t)}</div>
               <div className="mb-3.5">
                 <EvidenceGallery instanceId={t.id} />

@@ -11,12 +11,14 @@ import {
 import type { TaskInstance } from '../../lib/types'
 import { PrioBadge, StatusChip } from '../../components/ui'
 import { useChecklistItems } from '../../data/hooks'
-import { dueLabel, timeAgo } from '../../lib/format'
+import { dueLabel, sentBack, timeAgo } from '../../lib/format'
+import { useReviewHistory, useTaskTimeline, type TimelineEvent } from '../../data/reviews'
 import {
   ApprovalActions,
   EvidenceGallery,
   evidenceSummary,
-  taskStatusStyle,
+  ResubmissionNote,
+  statusStyleOf,
   useKindMeta,
   useNames,
 } from './shared'
@@ -43,7 +45,7 @@ export function TaskDetailModal({ task, onClose }: { task: TaskInstance; onClose
   const { userName, storeName } = useNames()
   const { Icon, c, b } = useKindMeta()(task)
   const { data: items } = useChecklistItems(task.id)
-  const st = taskStatusStyle[task.status] ?? taskStatusStyle.assigned
+  const st = statusStyleOf(task)
   const due = dueLabel(task)
   const geo = task.geofence_verdict ? geoLabel[task.geofence_verdict] : null
   const reviewable = task.status === 'submitted'
@@ -88,6 +90,7 @@ export function TaskDetailModal({ task, onClose }: { task: TaskInstance; onClose
         </div>
 
         <div className="flex flex-col gap-5 overflow-y-auto px-5 py-5 sm:px-6">
+          {reviewable && <ResubmissionNote task={task} />}
           <dl className="grid grid-cols-1 gap-x-4 gap-y-2 text-[12.5px] sm:grid-cols-2">
             {meta.map((m) => (
               <div key={m.k} className="flex gap-2">
@@ -174,12 +177,7 @@ export function TaskDetailModal({ task, onClose }: { task: TaskInstance; onClose
             <div className="mt-1.5 text-[11px] text-muted">Tap a photo or signature to open it full size.</div>
           </section>
 
-          {task.review_feedback && (
-            <section className="rounded-xl bg-warn-soft px-3.5 py-3 text-[12.5px] text-amber">
-              <div className="mb-0.5 text-[11px] font-bold uppercase tracking-wide">Reviewer feedback</div>
-              {task.review_feedback}
-            </section>
-          )}
+          <TaskHistory task={task} />
         </div>
 
         <div className="border-t border-line px-5 py-4 sm:px-6">
@@ -190,8 +188,8 @@ export function TaskDetailModal({ task, onClose }: { task: TaskInstance; onClose
               <div className="text-[12px] text-muted">
                 {task.status === 'completed' || task.status === 'approved'
                   ? 'This task is complete.'
-                  : task.status === 'rejected'
-                    ? 'Returned to staff to redo.'
+                  : task.status === 'rejected' || sentBack(task)
+                    ? 'Sent back — waiting for staff to redo and resubmit.'
                     : task.status === 'missed'
                       ? 'Missed its cutoff — manage it under Admin → Tasks.'
                       : 'Awaiting staff — nothing to review yet.'}
@@ -207,6 +205,70 @@ export function TaskDetailModal({ task, onClose }: { task: TaskInstance; onClose
         </div>
       </div>
     </div>
+  )
+}
+
+const toneDot: Record<TimelineEvent['tone'], string> = {
+  neutral: '#8B93A4',
+  good: '#16B364',
+  warn: '#F59E0B',
+  bad: '#E5484D',
+}
+
+/**
+ * Everything that happened to the task, oldest first: created, each submission, every reject /
+ * reopen with its feedback, approval, cancellation. Feedback is never lost to a later review.
+ */
+function TaskHistory({ task }: { task: TaskInstance }) {
+  const { userName } = useNames()
+  const { data: events } = useTaskTimeline(task.id)
+  const { data: reviews } = useReviewHistory(task.id)
+  // the audit trail is the full story; fall back to the review rows if it can't be read
+  const rows: TimelineEvent[] =
+    events && events.length
+      ? events
+      : (reviews ?? []).map((r) => ({
+          id: r.id,
+          at: r.created_at,
+          actor: r.reviewer,
+          label: r.verdict === 'approved' ? 'Approved' : r.verdict === 'rejected' ? 'Rejected' : 'Reopened',
+          note: r.feedback,
+          tone: r.verdict === 'approved' ? 'good' : r.verdict === 'rejected' ? 'bad' : 'warn',
+        }))
+  const sb = sentBack(task)
+  if (rows.length === 0 && !sb) return null
+  return (
+    <section>
+      <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-muted">History</div>
+      {sb && (
+        <div className="mb-2 rounded-xl bg-warn-soft px-3.5 py-2.5 text-[12.5px] text-amber">
+          <b>{sb.kind === 'rejected' ? 'Rejected' : 'Reopened'} — waiting for staff to redo it.</b>
+          {sb.feedback && <> Latest feedback: “{sb.feedback}”</>}
+        </div>
+      )}
+      <ol className="relative ml-1.5 border-l border-line pl-4">
+        {rows.map((e) => (
+          <li key={e.id} className="relative pb-2.5 last:pb-0">
+            <span
+              className="absolute -left-[21px] top-[5px] h-2.5 w-2.5 rounded-full border-2 border-white"
+              style={{ background: toneDot[e.tone] }}
+            />
+            <div className="text-[12.5px]">
+              <span className="font-semibold">{e.label}</span>
+              <span className="text-muted">
+                {' '}
+                · {userName(e.actor)} · {fmt(e.at)}
+              </span>
+            </div>
+            {e.note && (
+              <div className="mt-0.5 whitespace-pre-wrap rounded-lg bg-canvas px-2.5 py-1.5 text-[12px] text-slate">
+                “{e.note}”
+              </div>
+            )}
+          </li>
+        ))}
+      </ol>
+    </section>
   )
 }
 
@@ -246,7 +308,7 @@ export function TaskListModal({
           )}
           {tasks.map((t) => {
             const { Icon, c, b } = kind(t)
-            const st = taskStatusStyle[t.status] ?? taskStatusStyle.assigned
+            const st = statusStyleOf(t)
             const due = dueLabel(t)
             return (
               <button

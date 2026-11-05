@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
+  ArrowCounterClockwise,
   Check,
   ListChecks,
   Money,
@@ -16,7 +17,8 @@ import {
 import type { TaskInstance, Delivery, TaskCategory, Category } from '../../lib/types'
 import { categoryMeta, useCategories } from '../../data/categories'
 import { PrioBadge } from '../../components/ui'
-import { timeAgo } from '../../lib/format'
+import { sentBack, timeAgo } from '../../lib/format'
+import { useSendBacks } from '../../data/reviews'
 import { useReviewTask } from '../../data/hooks'
 import { useToast } from '../../components/Toast'
 import { useAuth } from '../../auth/AuthProvider'
@@ -78,11 +80,53 @@ export const taskStatusStyle: Record<string, { label: string; c: string; b: stri
   assigned: { label: 'Open', c: '#3B82F6', b: '#EAF1FE' },
   in_progress: { label: 'In progress', c: '#3B82F6', b: '#EAF1FE' },
   submitted: { label: 'Needs review', c: '#E8481F', b: '#FFF6F2' },
-  rejected: { label: 'Rejected · redo', c: '#B45309', b: '#FEF3E2' },
+  rejected: { label: 'Rejected · redo', c: '#C62F34', b: '#FCEBEC' },
+  // not a DB status: an open task that a reviewer sent back (see sentBack())
+  reopened: { label: 'Reopened · redo', c: '#B45309', b: '#FEF3E2' },
   approved: { label: 'Completed', c: '#0E9152', b: '#E7F7EF' },
   completed: { label: 'Completed', c: '#0E9152', b: '#E7F7EF' },
   missed: { label: 'Missed', c: '#E5484D', b: '#FCEBEC' },
   cancelled: { label: 'Cancelled', c: '#5B6478', b: '#F0F1F4' },
+}
+
+/** Status chip style for a task, telling reopened work apart from fresh open tasks. */
+export function statusStyleOf(t: TaskInstance) {
+  const key = sentBack(t)?.kind === 'reopened' ? 'reopened' : t.status
+  return taskStatusStyle[key] ?? taskStatusStyle.assigned
+}
+
+/**
+ * Earlier send-backs of a submission awaiting review: "Resubmitted after 1 reopen", with the
+ * feedback that was given each time, so the reviewer can check it was acted on.
+ */
+export function ResubmissionNote({ task, compact }: { task: TaskInstance; compact?: boolean }) {
+  const { data } = useSendBacks([task.id])
+  const { userName } = useNames()
+  const rounds = data?.[task.id] ?? []
+  if (rounds.length === 0) return null
+  const counts = rounds.reduce<Record<string, number>>((a, r) => ({ ...a, [r.verdict]: (a[r.verdict] ?? 0) + 1 }), {})
+  const what = Object.entries(counts)
+    .map(([v, n]) => `${n} ${v === 'rejected' ? 'rejection' : 'reopen'}${n === 1 ? '' : 's'}`)
+    .join(' & ')
+  const shown = compact ? rounds.slice(-1) : rounds
+  return (
+    <div className="mb-2 rounded-[9px] border border-[#F5C77A] bg-warn-soft px-2.5 py-2 text-[11.5px] text-slate">
+      <div className="mb-0.5 flex items-center gap-1.5 font-bold text-amber">
+        <ArrowCounterClockwise size={12} weight="bold" /> Resubmitted after {what}
+      </div>
+      {shown.map((r) => (
+        <div key={r.id} className="leading-snug">
+          <span className="font-semibold">
+            {r.verdict === 'rejected' ? 'Rejected' : 'Reopened'} by {userName(r.reviewer)} · {timeAgo(r.created_at)}:
+          </span>{' '}
+          {r.feedback ? `“${r.feedback}”` : <span className="text-muted">no feedback</span>}
+        </div>
+      ))}
+      {compact && rounds.length > 1 && (
+        <div className="text-[10.5px] text-muted">+{rounds.length - 1} earlier · open the task for the full history</div>
+      )}
+    </div>
+  )
 }
 
 export function EvidencePhoto({ ev }: { ev: EvidenceRow }) {
@@ -359,6 +403,7 @@ export function ApprovalCard({ task, onOpen }: { task: TaskInstance; onOpen?: ()
         </div>
         <PrioBadge p={task.priority} />
       </Head>
+      <ResubmissionNote task={task} compact />
       <Head
         onClick={onOpen}
         className="mb-2 flex w-full items-center gap-1.5 rounded-[9px] bg-canvas px-2.5 py-[7px] text-left text-[11.5px] text-slate"
