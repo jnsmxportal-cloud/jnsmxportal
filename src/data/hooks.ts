@@ -556,8 +556,14 @@ export function useResolveEscalation() {
         patch.resolved_at = new Date().toISOString()
         patch.resolved_by = session!.user.id
       }
-      const { error } = await supabase.from('escalations').update(patch).eq('id', args.id)
+      const { data, error } = await supabase
+        .from('escalations')
+        .update(patch)
+        .eq('id', args.id)
+        .select('id')
       if (error) throw error
+      // RLS filters a disallowed update to zero rows without an error — don't report success
+      if (!data?.length) throw new Error('You don’t have permission to update this escalation')
     },
     onSuccess: () => qc.invalidateQueries(),
   })
