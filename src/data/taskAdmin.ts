@@ -95,6 +95,10 @@ export function useSetTaskStatus() {
               submitted_at: null,
               submitted_by: null,
               completed_at: null,
+              // review stamp = "sent back": staff see it in their Reopened section (no feedback here)
+              reviewed_at: new Date().toISOString(),
+              reviewed_by: uid,
+              review_feedback: null,
             }
       const { error } = await supabase.from('task_instances').update(patch).eq('id', instance.id)
       if (error) throw error

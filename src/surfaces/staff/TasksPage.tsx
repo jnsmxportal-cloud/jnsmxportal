@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { format } from 'date-fns'
 import { useMyTasks } from '../../data/hooks'
-import { dateGroupLabel, dueLabel } from '../../lib/format'
+import { dateGroupLabel, dueLabel, sentBack } from '../../lib/format'
 import type { TaskInstance } from '../../lib/types'
 import { TaskRow } from './Home'
 
@@ -9,7 +9,7 @@ interface Group {
   key: string
   title: string
   sub: string | null
-  tone: 'danger' | 'brand' | 'default'
+  tone: 'danger' | 'warn' | 'brand' | 'default'
   tasks: TaskInstance[]
 }
 
@@ -24,10 +24,21 @@ export default function TasksPage() {
     const byDue = (a: TaskInstance, b: TaskInstance) =>
       (a.due_at ?? '9999').localeCompare(b.due_at ?? '9999')
     const all = [...(myTasks ?? [])].sort(byDue)
-    const overdue = all.filter((t) => dueLabel(t).overdue)
-    const rest = all.filter((t) => !dueLabel(t).overdue)
+    // sent back by a reviewer (reopened / rejected): its own section at the very top
+    const returned = all.filter((t) => sentBack(t))
+    const fresh = all.filter((t) => !sentBack(t))
+    const overdue = fresh.filter((t) => dueLabel(t).overdue)
+    const rest = fresh.filter((t) => !dueLabel(t).overdue)
 
     const out: Group[] = []
+    if (returned.length)
+      out.push({
+        key: 'returned',
+        title: 'Reopened',
+        sub: 'Sent back to you — read the feedback',
+        tone: 'warn',
+        tasks: returned,
+      })
     if (overdue.length)
       out.push({ key: 'overdue', title: 'Overdue', sub: 'Needs attention first', tone: 'danger', tasks: overdue })
 
@@ -69,7 +80,13 @@ export default function TasksPage() {
               <div className="flex items-baseline gap-2">
                 <span
                   className={`text-[13px] font-bold ${
-                    g.tone === 'danger' ? 'text-danger' : g.tone === 'brand' ? 'text-brand-dark' : 'text-ink'
+                    g.tone === 'danger'
+                    ? 'text-danger'
+                    : g.tone === 'warn'
+                      ? 'text-amber'
+                      : g.tone === 'brand'
+                        ? 'text-brand-dark'
+                        : 'text-ink'
                   }`}
                 >
                   {g.title}
@@ -78,7 +95,11 @@ export default function TasksPage() {
               </div>
               <span
                 className={`rounded-full px-2 py-px text-[10.5px] font-bold ${
-                  g.tone === 'danger' ? 'bg-danger-soft text-danger' : 'bg-white text-slate'
+                  g.tone === 'danger'
+                    ? 'bg-danger-soft text-danger'
+                    : g.tone === 'warn'
+                      ? 'bg-warn-soft text-amber'
+                      : 'bg-white text-slate'
                 }`}
               >
                 {g.tasks.length}

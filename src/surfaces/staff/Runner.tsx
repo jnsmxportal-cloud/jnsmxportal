@@ -23,6 +23,7 @@ import { useEvidence } from '../../data/ownerExtras'
 import GeoChip, { GeoNotice, useGeofence } from './GeoChip'
 import { useStaffStore } from './StaffShell'
 import QrScanner from '../../components/QrScanner'
+import SentBackBanner from './SentBackBanner'
 import type { ChecklistItem } from '../../lib/types'
 
 /**
@@ -435,6 +436,7 @@ export default function Runner() {
       </div>
 
       <div className="flex-1 p-4">
+        <SentBackBanner task={instance} />
         {(items ?? []).map((it) => (
           <ItemRow key={it.id} item={it} onPhoto={onPhoto} onQr={setQrItem} />
         ))}

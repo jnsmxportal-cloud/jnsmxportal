@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import {
+  ArrowCounterClockwise,
   Broom,
   CaretRight,
   ChatCircleDots,
@@ -14,12 +15,13 @@ import {
   Thermometer,
   Warning,
   Wrench,
+  XCircle,
   type Icon,
 } from '@phosphor-icons/react'
 import { useAuth } from '../../auth/AuthProvider'
 import { useMyTasks } from '../../data/hooks'
 import { categoryMeta, useCategories } from '../../data/categories'
-import { dueLabel } from '../../lib/format'
+import { dueLabel, sentBack } from '../../lib/format'
 import { format, isToday } from 'date-fns'
 import { Avatar } from '../../components/ui'
 import { useStaffStore } from './StaffShell'
@@ -56,33 +58,53 @@ export function TaskRow({ t, variant = 'default' }: { t: TaskInstance; variant?:
   const navigate = useNavigate()
   const { data: cats } = useCategories()
   const { text, overdue } = dueLabel(t)
-  const color = overdue ? '#E5484D' : t.status === 'rejected' ? '#F59E0B' : '#3B82F6'
-  const bg = overdue ? '#FCEBEC' : t.status === 'rejected' ? '#FEF3E2' : '#EAF1FE'
+  const sb = sentBack(t)
+  // sent-back work is amber (reopened) / red (rejected) so it stands out from fresh tasks
+  const sbColor = sb?.kind === 'rejected' ? '#E5484D' : '#D97706'
+  const color = overdue ? '#E5484D' : sb ? sbColor : '#3B82F6'
+  const bg = overdue ? '#FCEBEC' : sb ? (sb.kind === 'rejected' ? '#FCEBEC' : '#FEF3E2') : '#EAF1FE'
   const meta = categoryMeta(cats, t.category, t.is_temperature_log)
-  const RowIcon = meta.Icon
+  const RowIcon = sb ? (sb.kind === 'rejected' ? XCircle : ArrowCounterClockwise) : meta.Icon
   const due = t.due_at ? new Date(t.due_at) : null
   const grouped = variant === 'grouped'
-  const statusLine =
-    t.status === 'rejected'
-      ? `Reopened — ${t.review_feedback ?? 'see feedback'}`
-      : grouped && !overdue
-        ? meta.name
-        : text
+  const statusLine = sb
+    ? sb.feedback?.trim()
+      ? `“${sb.feedback.trim()}”`
+      : 'Sent back by your reviewer — tap to see'
+    : grouped && !overdue
+      ? meta.name
+      : text
   return (
     <button
       onClick={() => navigate(taskTarget(t))}
-      className="flex w-full items-center gap-3 rounded-[14px] border border-line bg-white p-[13px] text-left"
-      style={{ borderLeft: `3px solid ${color}` }}
+      className="flex w-full items-center gap-3 rounded-[14px] border border-line p-[13px] text-left"
+      style={{
+        borderLeft: `3px solid ${color}`,
+        background: sb && !overdue ? (sb.kind === 'rejected' ? '#FFF8F8' : '#FFFBF3') : '#FFFFFF',
+      }}
     >
       <div
         className="flex h-10 w-10 flex-none items-center justify-center rounded-[11px]"
         style={{ background: bg }}
       >
-        <RowIcon size={19} weight="fill" color={color} />
+        <RowIcon size={19} weight={sb ? 'bold' : 'fill'} color={color} />
       </div>
-      <div className="flex-1">
-        <div className="text-sm font-semibold">{t.title}</div>
-        <div className="text-[11.5px] font-medium" style={{ color: grouped && !overdue && t.status !== 'rejected' ? '#8B93A4' : color }}>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <span className="truncate text-sm font-semibold">{t.title}</span>
+          {sb && (
+            <span
+              className="flex-none rounded-full px-1.5 py-px text-[9.5px] font-bold uppercase tracking-wide text-white"
+              style={{ background: sbColor }}
+            >
+              {sb.kind === 'rejected' ? 'Rejected' : 'Reopened'}
+            </span>
+          )}
+        </div>
+        <div
+          className={`text-[11.5px] font-medium ${sb ? 'line-clamp-2' : ''}`}
+          style={{ color: sb ? '#5B6478' : grouped && !overdue ? '#8B93A4' : color }}
+        >
           {statusLine}
         </div>
       </div>
@@ -124,9 +146,14 @@ export default function Home() {
   const toast = useToast()
   const { data: myTasks } = useMyTasks()
 
-  const dueNow = (myTasks ?? [])
-    .filter((t) => t.due_at && new Date(t.due_at).getTime() < Date.now() + 4 * 3600e3)
-    .slice(0, 3)
+  // work sent back by a reviewer always shows here (it may have no deadline), then what is due soon
+  const sentBackTasks = (myTasks ?? []).filter((t) => sentBack(t))
+  const dueNow = [
+    ...sentBackTasks,
+    ...(myTasks ?? [])
+      .filter((t) => !sentBack(t) && t.due_at && new Date(t.due_at).getTime() < Date.now() + 4 * 3600e3)
+      .slice(0, 3),
+  ]
 
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'

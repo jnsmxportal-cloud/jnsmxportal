@@ -18,6 +18,7 @@ import WheelPicker from '../../components/WheelPicker'
 import QrScanner from '../../components/QrScanner'
 import GeoChip, { GeoNotice, useGeofence } from './GeoChip'
 import { useStaffStore } from './StaffShell'
+import SentBackBanner from './SentBackBanner'
 import { compressImage } from '../../lib/image'
 import { matchesUnit } from '../../lib/qr'
 import { format } from 'date-fns'
@@ -293,6 +294,7 @@ export default function TempLog() {
       </div>
 
       <div className="flex-1 p-4">
+        {instance && <SentBackBanner task={instance} />}
         {hasFail && (
           <div className="mb-3.5 flex gap-2.5 rounded-[13px] border border-danger/25 bg-danger-soft p-3">
             <WarningOctagon size={20} weight="fill" color="#E5484D" className="flex-none" />

@@ -26,6 +26,28 @@ export function dueLabel(t: { due_at: string | null; status: string }): {
   return { text: `Due ${format(due, 'EEE d MMM HH:mm')}`, overdue: false }
 }
 
+export interface SentBack {
+  kind: 'reopened' | 'rejected'
+  feedback: string | null
+  at: string | null
+}
+
+/**
+ * A task a reviewer sent back to staff: Rejected (status `rejected`) or Reopened (open again
+ * after a review — Approvals "Reopen" or Admin → Tasks "Reopen" both stamp `reviewed_at`;
+ * approval closes the task, so an open task with a review stamp was always sent back).
+ */
+export function sentBack(t: {
+  status: string
+  reviewed_at: string | null
+  review_feedback: string | null
+}): SentBack | null {
+  if (t.status === 'rejected') return { kind: 'rejected', feedback: t.review_feedback, at: t.reviewed_at }
+  if ((t.status === 'assigned' || t.status === 'in_progress') && t.reviewed_at)
+    return { kind: 'reopened', feedback: t.review_feedback, at: t.reviewed_at }
+  return null
+}
+
 /** Section heading for a due date: Today / Tomorrow (with the date as a subtitle) or the weekday + date. */
 export function dateGroupLabel(iso: string): { title: string; sub: string | null; isToday: boolean } {
   const d = new Date(iso)
