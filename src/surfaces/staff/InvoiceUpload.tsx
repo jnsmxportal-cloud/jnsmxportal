@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, CircleNotch, FilePdf, Receipt, Scan } from '@phosphor-icons/react'
+import { ArrowLeft, CircleNotch, FilePdf, Receipt } from '@phosphor-icons/react'
 import { format } from 'date-fns'
 import { supabase, ORG_ID } from '../../lib/supabase'
 import { useAuth } from '../../auth/AuthProvider'
@@ -9,9 +9,9 @@ import { useInvoices } from '../../data/hooks'
 import { audit } from '../../data/ops'
 import { timeAgo } from '../../lib/format'
 import { useToast } from '../../components/Toast'
-import DocScanner from '../../components/DocScanner'
+import InvoicePages, { useInvoicePages } from '../../components/InvoicePages'
 import { useStaffStore } from './StaffShell'
-import { buildInvoicePdf, enhanceScan, invoicePdfPath } from '../../lib/invoicePdf'
+import { buildInvoicePdf, invoicePdfPath } from '../../lib/invoicePdf'
 
 const suppliers = ['Booker', 'Coca-Cola Enterprises', 'Nisa', 'Bestway', 'Other']
 
@@ -23,23 +23,10 @@ export default function InvoiceUpload() {
   const store = useStaffStore()
   const [supplier, setSupplier] = useState(suppliers[0])
   const [invoiceNo, setInvoiceNo] = useState('')
-  const [preview, setPreview] = useState<{ dataUrl: string; w: number; h: number } | null>(null)
+  const invoicePages = useInvoicePages()
   const [busy, setBusy] = useState(false)
-  const [scanning, setScanning] = useState(false)
   const { data: recentInvoices } = useInvoices(store?.id)
-
-  const onScanned = async (dataUrl: string) => {
-    setScanning(false)
-    setBusy(true)
-    try {
-      setPreview(await enhanceScan(dataUrl))
-      toast('Scan enhanced · contrast corrected, ready to file', 'success')
-    } catch (e) {
-      toast((e as Error).message || 'Could not process the scan — please retry', 'error')
-    } finally {
-      setBusy(false)
-    }
-  }
+  const ready = invoicePages.count > 0 && !invoicePages.processing
 
   const openInvoice = async (path: string | null) => {
     if (!path) return
@@ -52,14 +39,15 @@ export default function InvoiceUpload() {
   }
 
   const submit = async () => {
-    if (!preview || busy) return
+    if (!ready || busy) return
     if (!store) {
       toast('No store is assigned to your account — ask your manager to add you to a store', 'error')
       return
     }
     setBusy(true)
     try {
-      const blob = buildInvoicePdf([preview])
+      const pageCount = invoicePages.pages.length
+      const blob = buildInvoicePdf(invoicePages.pages)
       const { month, path } = invoicePdfPath(store.name, supplier, invoiceNo)
       const { error: upErr } = await supabase.storage.from('invoices').upload(path, blob, {
         contentType: 'application/pdf',
@@ -76,7 +64,7 @@ export default function InvoiceUpload() {
       })
       if (error) throw new Error(`Filing failed: ${error.message}`)
       try {
-        await audit(session!.user.id, 'invoice.uploaded', 'invoice', '', { path })
+        await audit(session!.user.id, 'invoice.uploaded', 'invoice', '', { path, pages: pageCount })
       } catch {
         /* audit is best-effort */
       }
@@ -86,7 +74,7 @@ export default function InvoiceUpload() {
           icon: 'seal',
           color: '#16B364',
           title: 'Invoice filed',
-          msg: `Saved as PDF and filed under ${store.name} / ${supplier} / ${month}. Immediately searchable — no Remote Office step needed.`,
+          msg: `Saved as a ${pageCount}-page PDF and filed under ${store.name} / ${supplier} / ${month}. Immediately searchable — no Remote Office step needed.`,
         },
       })
     } catch (e) {
@@ -102,13 +90,6 @@ export default function InvoiceUpload() {
 
   return (
     <div className="flex min-h-full flex-col bg-canvas">
-      {scanning && (
-        <DocScanner
-          title="Scan invoice"
-          onDone={onScanned}
-          onClose={() => setScanning(false)}
-        />
-      )}
       <div className="border-b border-line bg-white px-4 pb-3 pt-2">
         <div className="flex items-center gap-2.5">
           <button onClick={() => navigate('/staff')} className="p-1" aria-label="Back">
@@ -144,37 +125,11 @@ export default function InvoiceUpload() {
           </div>
         </div>
 
-        <button
-          onClick={() => setScanning(true)}
-          className="flex w-full items-center gap-3 rounded-[14px] border-[1.5px] border-brand/50 bg-brand-tint p-3.5 text-left"
-        >
-          <div className="flex h-[46px] w-[46px] flex-none items-center justify-center rounded-xl bg-brand">
-            {busy ? (
-              <CircleNotch size={24} color="#fff" className="animate-spin" />
-            ) : (
-              <Scan size={24} weight="fill" color="#fff" />
-            )}
-          </div>
-          <div className="flex-1">
-            <div className="text-sm font-bold">{preview ? 'Retake scan' : 'Scan invoice'}</div>
-            <div className="mt-px text-[11.5px] text-muted">
-              Auto edge detect · adjust corners · archive-ready PDF
-            </div>
-          </div>
-        </button>
-
-        {preview && (
-          <div className="rounded-[14px] border border-line bg-white p-3">
-            <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-success-deep">
-              <FilePdf size={16} weight="fill" /> Enhanced preview
-            </div>
-            <img
-              src={preview.dataUrl}
-              alt="Enhanced invoice scan"
-              className="max-h-[300px] w-full rounded-lg object-contain"
-            />
-          </div>
-        )}
+        <InvoicePages
+          state={invoicePages}
+          title="Invoice pages"
+          hint="Scan every page — they’re enhanced and combined into a single archive-ready PDF. Tap a page to check it."
+        />
 
         {(recentInvoices ?? []).length > 0 && (
           <div className="rounded-[14px] border border-line bg-white">
@@ -205,10 +160,19 @@ export default function InvoiceUpload() {
       <div className="sticky bottom-0 border-t border-line bg-white p-4">
         <button
           onClick={submit}
-          disabled={!preview || busy}
+          disabled={!ready || busy}
           className="flex w-full items-center justify-center gap-2 rounded-[13px] bg-brand p-[15px] text-[15px] font-bold text-white disabled:opacity-50"
         >
-          <Receipt size={18} weight="fill" /> File invoice as PDF
+          {busy ? (
+            <CircleNotch size={18} className="animate-spin" />
+          ) : (
+            <Receipt size={18} weight="fill" />
+          )}
+          {busy
+            ? 'Filing…'
+            : invoicePages.count > 1
+              ? `File ${invoicePages.count}-page invoice as PDF`
+              : 'File invoice as PDF'}
         </button>
       </div>
     </div>

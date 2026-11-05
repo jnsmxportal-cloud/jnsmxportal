@@ -4,28 +4,21 @@ import {
   ArrowLeft,
   Camera,
   Check,
-  CircleNotch,
-  FilePdf,
   MapPin,
-  Plus,
-  Scan,
   Warning,
   X,
 } from '@phosphor-icons/react'
 import { useAuth } from '../../auth/AuthProvider'
 import { useSubmitDelivery } from '../../data/hooks'
 import { compressImage } from '../../lib/image'
-import { buildInvoicePdf, enhanceScan, type ScanPage } from '../../lib/invoicePdf'
+import { buildInvoicePdf } from '../../lib/invoicePdf'
 import { useToast } from '../../components/Toast'
-import DocScanner from '../../components/DocScanner'
+import InvoicePages, { useInvoicePages } from '../../components/InvoicePages'
 import GeoChip, { GeoNotice, useGeofence } from './GeoChip'
 import { useStaffStore } from './StaffShell'
 
 const suppliers = ['Booker', 'Coca-Cola Enterprises', 'Nisa', 'Bestway']
 const stepNames = ['Details', 'Invoice & goods', 'Remarks', 'Review']
-
-/** A scanned invoice page; `page` is null while the scan is still being enhanced. */
-type PageSlot = { id: number; page: ScanPage | null }
 
 export default function DeliveryWizard() {
   const navigate = useNavigate()
@@ -43,10 +36,8 @@ export default function DeliveryWizard() {
   const [remarks, setRemarks] = useState('')
   const [photos, setPhotos] = useState<{ blob: Blob; url: string }[]>([])
   const fileRef = useRef<HTMLInputElement>(null)
-  const [pages, setPages] = useState<PageSlot[]>([])
-  const [scanning, setScanning] = useState(false)
-  const slotId = useRef(0)
-  const pagesProcessing = pages.some((s) => !s.page)
+  const invoicePages = useInvoicePages()
+  const pagesProcessing = invoicePages.processing
 
   const qtyNum = parseInt(qty || '0', 10)
   /** Units short — only counts when staff answered "Yes" (a "No" ignores any stale number). */
@@ -82,20 +73,6 @@ export default function DeliveryWizard() {
     })
   }
 
-  /** Each accepted page arrives here; a slot is reserved first so pages keep their scan order. */
-  const onPageScanned = (dataUrl: string) => {
-    const id = ++slotId.current
-    setPages((p) => [...p, { id, page: null }])
-    enhanceScan(dataUrl)
-      .then((page) => setPages((p) => p.map((s) => (s.id === id ? { id, page } : s))))
-      .catch((e) => {
-        setPages((p) => p.filter((s) => s.id !== id))
-        toast(e instanceof Error ? e.message : 'Could not process that page — please rescan it', 'error')
-      })
-  }
-
-  const removePage = (id: number) => setPages((p) => p.filter((s) => s.id !== id))
-
   const next = () => {
     if (step === 2 && discrepancyMissing) return
     if (step < 3) {
@@ -108,7 +85,7 @@ export default function DeliveryWizard() {
       return
     }
     let invoicePdf: Blob | null = null
-    const scanned = pages.flatMap((s) => (s.page ? [s.page] : []))
+    const scanned = invoicePages.pages
     if (scanned.length) {
       try {
         invoicePdf = buildInvoicePdf(scanned)
@@ -173,16 +150,6 @@ export default function DeliveryWizard() {
 
   return (
     <div className="flex min-h-full flex-col bg-canvas">
-      {scanning && (
-        <DocScanner
-          title="Scan invoice"
-          multiPage
-          pageCount={pages.length}
-          onDone={onPageScanned}
-          onFinish={() => setScanning(false)}
-          onClose={() => setScanning(false)}
-        />
-      )}
       <input
         ref={fileRef}
         type="file"
@@ -257,73 +224,10 @@ export default function DeliveryWizard() {
 
         {step === 1 && (
           <div className="flex flex-col gap-5">
-            <div>
-              <div className="mb-1 flex items-center justify-between">
-                <span className="text-[13px] font-semibold">Invoice</span>
-                {pages.length > 0 && (
-                  <span className="flex items-center gap-1 text-[11px] font-semibold text-success-deep">
-                    <FilePdf size={14} weight="fill" />
-                    {pages.length} page{pages.length === 1 ? '' : 's'} · one PDF
-                  </span>
-                )}
-              </div>
-              <div className="mb-3 text-xs text-muted">
-                Scan every page of the supplier invoice — they’re combined into a single PDF and
-                filed in the invoice folder.
-              </div>
-              {pages.length === 0 ? (
-                <button
-                  onClick={() => setScanning(true)}
-                  className="flex w-full items-center gap-3 rounded-[14px] border-[1.5px] border-brand/50 bg-brand-tint p-3.5 text-left"
-                >
-                  <div className="flex h-[46px] w-[46px] flex-none items-center justify-center rounded-xl bg-brand">
-                    <Scan size={24} weight="fill" color="#fff" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="text-sm font-bold">Scan invoice</div>
-                    <div className="mt-px text-[11.5px] text-muted">
-                      Multi-page · auto edge detect · saved as one PDF
-                    </div>
-                  </div>
-                </button>
-              ) : (
-                <div className="grid grid-cols-4 gap-2">
-                  {pages.map((s, i) => (
-                    <div
-                      key={s.id}
-                      className="relative aspect-[3/4] overflow-hidden rounded-[11px] border border-ink/10 bg-white"
-                    >
-                      {s.page ? (
-                        <img src={s.page.dataUrl} alt={`Invoice page ${i + 1}`} className="h-full w-full object-cover object-top" />
-                      ) : (
-                        <div className="flex h-full items-center justify-center">
-                          <CircleNotch size={20} className="animate-spin text-muted" />
-                        </div>
-                      )}
-                      <span className="absolute bottom-1 left-1 rounded-md bg-ink/75 px-1.5 text-[10px] font-bold text-white">
-                        {i + 1}
-                      </span>
-                      {s.page && (
-                        <button
-                          onClick={() => removePage(s.id)}
-                          aria-label={`Remove page ${i + 1}`}
-                          className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-ink/70"
-                        >
-                          <X size={13} weight="bold" color="#fff" />
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                  <button
-                    onClick={() => setScanning(true)}
-                    className="flex aspect-[3/4] flex-col items-center justify-center gap-1 rounded-[11px] border-[1.5px] border-dashed border-brand/50 bg-brand-tint"
-                  >
-                    <Plus size={20} color="#FF5A2D" weight="bold" />
-                    <span className="text-[10px] font-semibold text-brand">Add page</span>
-                  </button>
-                </div>
-              )}
-            </div>
+            <InvoicePages
+              state={invoicePages}
+              hint="Scan every page of the supplier invoice — they’re combined into a single PDF and filed in the invoice folder."
+            />
 
             <div>
             <div className="mb-1 text-[13px] font-semibold">Goods photos</div>
@@ -447,8 +351,8 @@ export default function DeliveryWizard() {
                   ['Invoice', invoice ? `#${invoice}` : '—'],
                   [
                     'Invoice scan',
-                    pages.length
-                      ? `${pages.length}-page PDF${pagesProcessing ? ' (processing…)' : ''}`
+                    invoicePages.count
+                      ? `${invoicePages.count}-page PDF${pagesProcessing ? ' (processing…)' : ''}`
                       : 'Not scanned',
                   ],
                   ['Goods photos', `${photos.length} captured`],
