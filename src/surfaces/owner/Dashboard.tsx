@@ -131,7 +131,8 @@ export default function Dashboard() {
     onlineStaff.filter((p) =>
       (storeRoles ?? []).some((r) => r.user_id === p.id && r.store_id === sid),
     ).length
-  const todaysDeliveries = (deliveries ?? []).filter((d) => isToday(new Date(d.submitted_at)))
+  // awaiting action: logged (review) or verified but not yet approved / rejected — any day
+  const pendingDeliveries = (deliveries ?? []).filter((d) => d.status === 'review' || d.status === 'verified')
 
   return (
     <div className="animate-fade">
@@ -239,11 +240,11 @@ export default function Dashboard() {
             <div className="flex items-center justify-between border-b border-ink/5 px-[17px] py-[15px]">
               <div className="flex items-center gap-2">
                 <Truck size={16} weight="fill" color="#3B82F6" />
-                <h3 className="text-sm font-bold">Today's deliveries</h3>
+                <h3 className="text-sm font-bold">Pending deliveries</h3>
               </div>
-              <span className="text-[11.5px] text-muted">{todaysDeliveries.length} logged</span>
+              <span className="text-[11.5px] text-muted">{pendingDeliveries.length} awaiting review</span>
             </div>
-            {todaysDeliveries.map((d) => {
+            {pendingDeliveries.map((d) => {
               const st = deliveryStatusStyle[d.status]
               return (
                 <div
@@ -275,8 +276,8 @@ export default function Dashboard() {
                 </div>
               )
             })}
-            {todaysDeliveries.length === 0 && (
-              <div className="p-8 text-center text-xs text-muted">No deliveries logged today.</div>
+            {pendingDeliveries.length === 0 && (
+              <div className="p-8 text-center text-xs text-muted">No deliveries awaiting review.</div>
             )}
           </Card>
 
