@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   ArrowCounterClockwise,
+  ChatText,
   Check,
   ListChecks,
   Money,
@@ -159,6 +160,53 @@ export function EvidencePhoto({ ev }: { ev: EvidenceRow }) {
   )
 }
 
+/** Messages staff wrote to the reviewer when submitting (evidence rows of type `note`), newest first. */
+function StaffNotes({ rows }: { rows: EvidenceRow[] }) {
+  const { userName } = useNames()
+  const notes = rows
+    .filter((e) => e.type === 'note' && (e.metadata as { text?: string } | null)?.text)
+    .sort((a, b) => b.device_ts.localeCompare(a.device_ts))
+  if (notes.length === 0) return null
+  return (
+    <div className="flex flex-col gap-1.5">
+      {notes.map((e, i) => (
+        <div
+          key={e.id}
+          className={`rounded-[10px] border px-3 py-2 ${i === 0 ? 'border-info/30 bg-info-soft/60' : 'border-ink/10 bg-canvas/60 opacity-80'}`}
+        >
+          <div className="mb-0.5 flex items-center gap-1 text-[10.5px] font-bold uppercase tracking-wide text-[#2563EB]">
+            <ChatText size={11} weight="fill" /> Message from {userName(e.uploader)}
+            <span className="font-medium normal-case tracking-normal text-muted">· {timeAgo(e.device_ts)}</span>
+          </div>
+          <div className="whitespace-pre-wrap text-[12.5px] leading-relaxed text-ink">
+            {(e.metadata as { text: string }).text}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** Compact approval cards: just the newest staff message, clamped, so it isn't missed. */
+export function LatestStaffNote({ task }: { task: TaskInstance }) {
+  const { data: evidence } = useEvidence(task.id)
+  const { userName } = useNames()
+  const latest = (evidence ?? [])
+    .filter((e) => e.type === 'note' && (e.metadata as { text?: string } | null)?.text)
+    .sort((a, b) => b.device_ts.localeCompare(a.device_ts))[0]
+  if (!latest) return null
+  return (
+    <div className="mb-2 rounded-[10px] border border-info/30 bg-info-soft/60 px-2.5 py-[7px]">
+      <div className="mb-0.5 flex items-center gap-1 text-[10.5px] font-bold uppercase tracking-wide text-[#2563EB]">
+        <ChatText size={11} weight="fill" /> Message from {userName(latest.uploader)}
+      </div>
+      <div className="line-clamp-3 whitespace-pre-wrap text-[12px] leading-relaxed text-ink">
+        {(latest.metadata as { text: string }).text}
+      </div>
+    </div>
+  )
+}
+
 export function EvidenceGallery({ instanceId }: { instanceId: string }) {
   const { data: evidence } = useEvidence(instanceId)
   const rows = evidence ?? []
@@ -168,6 +216,15 @@ export function EvidenceGallery({ instanceId }: { instanceId: string }) {
         No evidence attached
       </div>
     )
+  return (
+    <div className="flex flex-col gap-2.5">
+      <StaffNotes rows={rows} />
+      <EvidenceMedia rows={rows} />
+    </div>
+  )
+}
+
+function EvidenceMedia({ rows }: { rows: EvidenceRow[] }) {
   const allPhotos = rows.filter((e) => e.type === 'photo' && e.storage_path)
   const unitKey = (e: EvidenceRow) => {
     const m = (e.metadata ?? {}) as { unit_id?: string; unit?: string }
@@ -614,6 +671,7 @@ export function ApprovalCard({ task, onOpen }: { task: TaskInstance; onOpen?: ()
       </Head>
       <ResubmissionNote task={task} compact />
       <IncidentNote task={task} compact />
+      <LatestStaffNote task={task} />
       <Head
         onClick={onOpen}
         className="mb-2 flex w-full items-center gap-1.5 rounded-[9px] bg-canvas px-2.5 py-[7px] text-left text-[11.5px] text-slate"

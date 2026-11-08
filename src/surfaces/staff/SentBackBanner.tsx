@@ -86,7 +86,11 @@ export default function SentBackBanner({ task }: { task: TaskInstance }) {
                 <Signature size={13} /> signed — sign again below
               </span>
             )}
-            {!task.is_temperature_log && <span>Your ticks are kept — change what the feedback asks for.</span>}
+            {task.category === 'incident' ? (
+              <span>Add photos or a message below to answer the feedback.</span>
+            ) : (
+              !task.is_temperature_log && <span>Your ticks are kept — change what the feedback asks for.</span>
+            )}
           </div>
         </div>
       )}

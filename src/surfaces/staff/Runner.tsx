@@ -4,11 +4,14 @@ import { useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft,
   Camera,
+  ChatText,
   Check,
   CheckCircle,
   QrCode,
   Signature as SignatureIcon,
+  Warning,
 } from '@phosphor-icons/react'
+import { sentBack } from '../../lib/format'
 import { supabase, ORG_ID } from '../../lib/supabase'
 import { compressImage } from '../../lib/image'
 import { useAuth } from '../../auth/AuthProvider'
@@ -248,16 +251,31 @@ export default function Runner() {
   const qc = useQueryClient()
   const { data: evidenceRows } = useEvidence(id ?? null)
   const [uploading, setUploading] = useState(false)
+  // optional message for the reviewer, saved as a `note` evidence row on submit
+  const [note, setNote] = useState('')
 
   const done = (items ?? []).filter((i) => i.checked).length
   const total = (items ?? []).length
   const progress = total === 0 ? 0 : Math.round((done / total) * 100)
+  const isIncident = instance?.category === 'incident'
+  const returned = instance ? sentBack(instance) : null
+  // incidents, tasks without a checklist and anything sent back can carry optional photos and a
+  // message — otherwise a reopened incident offers nothing but a bare Submit button
+  const openEvidence = isIncident || total === 0 || !!returned
   const requiresSig = instance?.evidence?.signature
   // task-level photo requirement: at least one photo must be attached to the task (any item or the
   // task itself) before it can be submitted — the per-item camera toggles are enforced separately
   const requiresPhoto = !!instance?.evidence?.photo
+  const showPhotos = requiresPhoto || openEvidence
   const taskPhotos = (evidenceRows ?? []).filter((e) => e.type === 'photo' && e.storage_path)
   const photoOk = !requiresPhoto || taskPhotos.length > 0
+  const submitLabel = isIncident
+    ? returned
+      ? 'Resubmit incident report'
+      : 'Submit incident report'
+    : total === 0
+      ? 'Submit task'
+      : 'Submit checklist'
   const noLocation = geo?.verdict === 'unknown'
   const blocked =
     instance?.geofence_policy === 'block' &&
@@ -272,7 +290,7 @@ export default function Runner() {
   ].filter(Boolean) as string[]
   const missingSteps = missing.length
     ? `${missing.join(', ').replace(/^./, (c) => c.toUpperCase())} to submit`
-    : 'Submit checklist'
+    : submitLabel
 
   const onPhoto = (item: ChecklistItem | null) => {
     photoItem.current = item
@@ -367,6 +385,23 @@ export default function Runner() {
         return
       }
     }
+    const message = note.trim()
+    if (message) {
+      const { error: noteError } = await supabase.from('evidence').insert({
+        org_id: ORG_ID,
+        instance_id: instance.id,
+        type: 'note',
+        metadata: { text: message },
+        uploader: session!.user.id,
+        device_ts: new Date().toISOString(),
+        geofence_verdict: geo?.verdict ?? 'unknown',
+      })
+      if (noteError) {
+        toast(`Could not save your message: ${noteError.message}`, 'error')
+        return
+      }
+      setNote('')
+    }
     submit.mutate(
       {
         instance,
@@ -379,11 +414,22 @@ export default function Runner() {
             state: {
               icon: 'seal',
               color: '#16B364',
-              title: instance.requires_approval === false ? 'Checklist completed' : 'Checklist submitted',
+              title:
+                instance.requires_approval === false
+                  ? isIncident
+                    ? 'Incident report completed'
+                    : total === 0
+                      ? 'Task completed'
+                      : 'Checklist completed'
+                  : isIncident
+                    ? 'Incident report sent'
+                    : total === 0
+                      ? 'Task submitted'
+                      : 'Checklist submitted',
               msg: `${
                 instance.requires_approval === false
                   ? 'Logged and archived — no review needed for this task.'
-                  : 'Locked & sent to your Team Leader for verification.'
+                  : `Sent to your Team Leader for review${message ? ' with your message' : ''}.`
               }${geo?.verdict === 'verified' ? ' Evidence stamped ✓ Verified on-site.' : ''}`,
             },
           }),
@@ -432,26 +478,42 @@ export default function Runner() {
           <div className="flex-1">
             <div className="text-[15.5px] font-bold">{instance.title}</div>
             <div className="text-[11px] text-muted">
-              {done} / {total} complete
+              {total > 0
+                ? `${done} / ${total} complete`
+                : isIncident
+                  ? 'Incident report'
+                  : 'No checklist — add photos or a message if needed'}
             </div>
           </div>
           <GeoChip result={geo} checking={checking} storeName={store?.name ?? ''} />
         </div>
-        <div className="h-1.5 overflow-hidden rounded-md bg-[#EDEEF1]">
-          <div
-            className="h-full rounded-md bg-success transition-all duration-300"
-            style={{ width: `${progress}%` }}
-          />
-        </div>
+        {total > 0 && (
+          <div className="h-1.5 overflow-hidden rounded-md bg-[#EDEEF1]">
+            <div
+              className="h-full rounded-md bg-success transition-all duration-300"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+        )}
       </div>
 
       <div className="flex-1 p-4">
         <SentBackBanner task={instance} />
+        {isIncident && instance.description?.trim() && (
+          <div className="mb-2.5 rounded-[14px] border border-line bg-white p-3.5">
+            <div className="mb-1 flex items-center gap-1.5 text-[13.5px] font-semibold">
+              <Warning size={17} color="#E5484D" weight="fill" /> What you reported
+            </div>
+            <div className="whitespace-pre-wrap text-[13px] leading-relaxed text-slate">
+              {instance.description}
+            </div>
+          </div>
+        )}
         {(items ?? []).map((it) => (
           <ItemRow key={it.id} item={it} onPhoto={onPhoto} onQr={setQrItem} />
         ))}
 
-        {requiresPhoto && (
+        {showPhotos && (
           <div className="mb-2.5 rounded-[14px] border border-line bg-white p-3.5">
             <div className="mb-2 flex items-center justify-between">
               <span className="flex items-center gap-1.5 text-[13.5px] font-semibold">
@@ -464,12 +526,20 @@ export default function Runner() {
                   background: photoOk ? '#E7F7EF' : '#FFF6F2',
                 }}
               >
-                {photoOk ? `${taskPhotos.length} attached ✓` : 'Required'}
+                {taskPhotos.length
+                  ? `${taskPhotos.length} attached ✓`
+                  : requiresPhoto
+                    ? 'Required'
+                    : 'Optional'}
               </span>
             </div>
             <div className="mb-2 text-[11.5px] leading-relaxed text-muted">
-              Take at least one photo of the finished task. It is stamped with time and location and goes
-              to the reviewer with your submission.
+              {requiresPhoto
+                ? 'Take at least one photo of the finished task.'
+                : isIncident
+                  ? 'Add photos of the issue or of what you have done about it.'
+                  : 'Add photos if they help the reviewer.'}{' '}
+              Photos are stamped with time and location and go to the reviewer with your submission.
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {taskPhotos.map((e) => (
@@ -497,6 +567,29 @@ export default function Runner() {
                 <Camera size={18} /> {uploading ? 'Saving…' : taskPhotos.length ? 'Add another' : 'Take photo'}
               </button>
             </div>
+          </div>
+        )}
+
+        {openEvidence && (
+          <div className="mb-2.5 rounded-[14px] border border-line bg-white p-3.5">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="flex items-center gap-1.5 text-[13.5px] font-semibold">
+                <ChatText size={17} color="#FF5A2D" /> Message to your reviewer
+              </span>
+              <span className="rounded-full bg-canvas px-2 py-0.5 text-[10px] font-bold text-slate">Optional</span>
+            </div>
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder={
+                returned
+                  ? 'What have you done about the feedback?'
+                  : isIncident
+                    ? 'Any update on the incident?'
+                    : 'Anything the reviewer should know?'
+              }
+              className="h-[84px] w-full resize-none rounded-xl border-[1.5px] border-ink/15 bg-white p-3 text-[13.5px] outline-none focus:border-brand"
+            />
           </div>
         )}
 
@@ -576,7 +669,7 @@ export default function Runner() {
               ? 'Enable location to submit this task'
               : 'Blocked — outside geofence'
             : canSubmit
-              ? 'Submit checklist'
+              ? submitLabel
               : missingSteps}
         </button>
       </div>

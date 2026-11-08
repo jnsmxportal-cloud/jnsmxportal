@@ -8,7 +8,8 @@ export interface EvidenceRow {
   instance_id: string | null
   delivery_id: string | null
   item_id: string | null
-  type: 'photo' | 'signature' | 'qr' | 'metadata'
+  /** `note` = a message staff wrote to the reviewer on submit (metadata.text) */
+  type: 'photo' | 'signature' | 'qr' | 'metadata' | 'note'
   storage_path: string | null
   metadata: Record<string, unknown> | null
   uploader: string | null
