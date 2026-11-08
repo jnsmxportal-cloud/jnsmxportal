@@ -533,7 +533,7 @@ export default function DocScanner({
                 disabled={busy}
                 className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-brand px-3 py-3 text-[13px] font-bold text-white disabled:opacity-60"
               >
-                <Check size={15} weight="bold" /> {pageCount > 0 ? 'Last page' : 'Done'}
+                <Check size={15} weight="bold" /> Done
               </button>
             </div>
           ) : (
