@@ -23,6 +23,7 @@ import { useOwnerCtx } from './OwnerLayout'
 import { ApprovalCard, storeCompliance, useNames } from './shared'
 import { isOnline, useUserStoreRoles } from '../../data/ownerExtras'
 import { TaskDetailModal, TaskListModal } from './TaskDetailModal'
+import { DeliveryDetailModal } from './DeliveryDetailModal'
 
 export default function Dashboard() {
   const { storeId } = useOwnerCtx()
@@ -31,6 +32,8 @@ export default function Dashboard() {
   // look-ups: a KPI tile opens its list of tasks; a row anywhere opens the task itself
   const [list, setList] = useState<{ title: string; sub?: string; tasks: TaskInstance[] } | null>(null)
   const [open, setOpen] = useState<TaskInstance | null>(null)
+  // by id, so the modal shows the live row (realtime refetches) rather than a stale snapshot
+  const [openDeliveryId, setOpenDeliveryId] = useState<string | null>(null)
   const { data: allTasks } = useTasks({ storeId: 'all' })
   const { data: deliveries } = useDeliveries(storeId)
   const { data: escalations } = useEscalations(storeId)
@@ -133,6 +136,7 @@ export default function Dashboard() {
     ).length
   // awaiting action: logged (review) or verified but not yet approved / rejected — any day
   const pendingDeliveries = (deliveries ?? []).filter((d) => d.status === 'review' || d.status === 'verified')
+  const openDelivery = openDeliveryId ? (deliveries ?? []).find((d) => d.id === openDeliveryId) ?? null : null
 
   return (
     <div className="animate-fade">
@@ -247,9 +251,10 @@ export default function Dashboard() {
             {pendingDeliveries.map((d) => {
               const st = deliveryStatusStyle[d.status]
               return (
-                <div
+                <button
                   key={d.id}
-                  className="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 border-b border-ink/5 px-[17px] py-3 sm:grid-cols-[1.4fr_1fr_.9fr_auto]"
+                  onClick={() => setOpenDeliveryId(d.id)}
+                  className="grid w-full grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 border-b border-ink/5 px-[17px] py-3 text-left transition hover:bg-canvas sm:grid-cols-[1.4fr_1fr_.9fr_auto]"
                 >
                   <div>
                     <div className="text-[13px] font-semibold">{d.supplier}</div>
@@ -273,7 +278,7 @@ export default function Dashboard() {
                     )}
                   </div>
                   <StatusChip text={st.label} color={st.c} bg={st.b} />
-                </div>
+                </button>
               )
             })}
             {pendingDeliveries.length === 0 && (
@@ -419,6 +424,7 @@ export default function Dashboard() {
 
       {list && <TaskListModal {...list} onClose={() => setList(null)} />}
       {open && <TaskDetailModal task={open} onClose={() => setOpen(null)} />}
+      {openDelivery && <DeliveryDetailModal delivery={openDelivery} onClose={() => setOpenDeliveryId(null)} />}
     </div>
   )
 }

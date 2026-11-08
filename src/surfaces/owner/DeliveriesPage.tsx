@@ -2,142 +2,13 @@ import { useState } from 'react'
 import { Check, ClipboardText, FilePdf, FolderOpen, X } from '@phosphor-icons/react'
 import { Card, StatusChip, deliveryStatusStyle } from '../../components/ui'
 import { useAuth } from '../../auth/AuthProvider'
-import { useDeliveries, useInvoices, useReviewDelivery, useVerifyDelivery } from '../../data/hooks'
-import { supabase } from '../../lib/supabase'
+import { useDeliveries, useInvoices, useReviewDelivery } from '../../data/hooks'
 import { timeAgo } from '../../lib/format'
 import { useToast } from '../../components/Toast'
 import { useOwnerCtx } from './OwnerLayout'
-import { EvidencePhoto, useNames } from './shared'
-import { useDeliveryEvidence } from '../../data/ownerExtras'
+import { useNames } from './shared'
+import { DeliveryDetailModal, VerifyModal, useOpenInvoicePdf } from './DeliveryDetailModal'
 import type { Delivery } from '../../lib/types'
-
-/** Open a PDF from the `invoices` bucket via a short-lived signed URL. */
-function useOpenInvoicePdf() {
-  const toast = useToast()
-  return async (path: string | null) => {
-    if (!path) return
-    const { data, error } = await supabase.storage.from('invoices').createSignedUrl(path, 300)
-    if (error || !data?.signedUrl) {
-      toast('Could not open the PDF', 'error')
-      return
-    }
-    window.open(data.signedUrl, '_blank')
-  }
-}
-
-function VerifyModal({ delivery, onClose }: { delivery: Delivery; onClose: () => void }) {
-  const verify = useVerifyDelivery()
-  const toast = useToast()
-  const openPdf = useOpenInvoicePdf()
-  const { data: evidence } = useDeliveryEvidence(delivery.id)
-  const photos = (evidence ?? []).filter((e) => e.type === 'photo' && e.storage_path)
-  const [cost, setCost] = useState((delivery.cost ?? delivery.invoice_total)?.toString() ?? '')
-  const [qty, setQty] = useState('')
-  const [epos, setEpos] = useState(false)
-  const [shortages, setShortages] = useState(
-    delivery.discrepancy_units > 0 ? `${delivery.discrepancy_units} unit(s) short per staff count` : '',
-  )
-  const inputCls =
-    'w-full rounded-xl border-[1.5px] border-ink/15 bg-white p-2.5 text-sm outline-none focus:border-brand'
-  const label = 'mb-1.5 block text-xs font-semibold text-slate'
-
-  return (
-    <div onClick={onClose} className="fixed inset-0 z-[80] flex items-center justify-center bg-navy/50 p-6">
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="w-[440px] max-w-full animate-fade rounded-[20px] bg-white p-6 shadow-[0_30px_80px_rgba(0,0,0,.3)]"
-      >
-        <div className="mb-1 flex items-center justify-between">
-          <h3 className="text-[17px] font-bold">Verify delivery</h3>
-          <button onClick={onClose} className="p-1 text-muted"><X size={18} /></button>
-        </div>
-        <div className="mb-4 text-xs text-muted">
-          {delivery.supplier} · Inv #{delivery.invoice_no} — Remote Office step: confirm cost &amp;
-          quantity, then it goes to the Owner for approval.
-        </div>
-        <label className={label}>Invoice scan</label>
-        {delivery.invoice_pdf_path ? (
-          <button
-            onClick={() => openPdf(delivery.invoice_pdf_path)}
-            className="mb-3 flex w-full items-center gap-2.5 rounded-[10px] border border-ink/15 px-3 py-2.5 text-left"
-          >
-            <FilePdf size={20} weight="fill" color="#DB2777" />
-            <span className="flex-1 text-[12.5px] font-semibold">
-              Invoice{delivery.invoice_no ? ` #${delivery.invoice_no}` : ''}
-              {delivery.invoice_pages ? (
-                <span className="font-normal text-muted">
-                  {' '}· {delivery.invoice_pages} page{delivery.invoice_pages === 1 ? '' : 's'}
-                </span>
-              ) : null}
-            </span>
-            <span className="text-[11.5px] font-semibold text-brand">Open PDF</span>
-          </button>
-        ) : (
-          <div className="mb-3 rounded-[10px] border border-dashed border-ink/15 px-3 py-2.5 text-[11.5px] text-muted">
-            No invoice scanned with this delivery
-          </div>
-        )}
-        <label className={label}>Goods photos from the store</label>
-        {photos.length > 0 ? (
-          <div className="mb-3 flex flex-wrap gap-2">
-            {photos.map((e) => (
-              <EvidencePhoto key={e.id} ev={e} />
-            ))}
-          </div>
-        ) : (
-          <div className="mb-3 rounded-[10px] border border-dashed border-ink/15 px-3 py-2.5 text-[11.5px] text-muted">
-            No photos attached to this delivery
-          </div>
-        )}
-        <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div>
-            <label className={label}>Cost per original invoice (£)</label>
-            <input value={cost} onChange={(e) => setCost(e.target.value)} inputMode="decimal" className={inputCls} />
-          </div>
-          <div>
-            <label className={label}>Final quantity (units)</label>
-            <input value={qty} onChange={(e) => setQty(e.target.value)} inputMode="numeric" className={inputCls} />
-          </div>
-        </div>
-        <label className={label}>Stock shortages</label>
-        <textarea
-          value={shortages}
-          onChange={(e) => setShortages(e.target.value)}
-          className={`${inputCls} mb-3 h-16 resize-none`}
-          placeholder="None"
-        />
-        <label className="mb-4 flex items-center gap-2 text-[13px] font-semibold text-slate">
-          <input type="checkbox" checked={epos} onChange={(e) => setEpos(e.target.checked)} className="h-4 w-4 accent-[#FF5A2D]" />
-          EPOS updated
-        </label>
-        <button
-          onClick={() =>
-            verify.mutate(
-              {
-                delivery,
-                cost: cost ? parseFloat(cost) : null,
-                finalQty: qty ? parseInt(qty, 10) : null,
-                eposUpdated: epos,
-                stockShortages: shortages,
-              },
-              {
-                onSuccess: () => {
-                  toast('Verified · approval request pushed to the Owner')
-                  onClose()
-                },
-                onError: (e) => toast(e.message, 'error'),
-              },
-            )
-          }
-          disabled={verify.isPending}
-          className="w-full rounded-xl bg-brand p-3 text-[13.5px] font-semibold text-white disabled:opacity-60"
-        >
-          Complete verification
-        </button>
-      </div>
-    </div>
-  )
-}
 
 function InvoiceFolder({ storeId }: { storeId: string | 'all' }) {
   const { data: invoices } = useInvoices(storeId)
@@ -189,6 +60,9 @@ export default function DeliveriesPage() {
   const canAct = can('deliveries.verify')
   const openPdf = useOpenInvoicePdf()
   const [verifying, setVerifying] = useState<Delivery | null>(null)
+  // by id, so the modal shows the live row (realtime refetches) rather than a stale snapshot
+  const [openId, setOpenId] = useState<string | null>(null)
+  const openDelivery = openId ? (deliveries ?? []).find((d) => d.id === openId) ?? null : null
 
   return (
     <div className="animate-fade">
@@ -208,7 +82,21 @@ export default function DeliveriesPage() {
         const st = deliveryStatusStyle[d.status]
         const verified = d.status === 'verified' || d.status === 'approved'
         return (
-          <div key={d.id} className="border-t border-ink/5">
+          // the whole row (incl. the verification strip) opens the delivery; the inline
+          // PDF / Review / Approve / Reject buttons stop propagation so they act on their own
+          <div
+            key={d.id}
+            role="button"
+            tabIndex={0}
+            aria-label={`Open delivery from ${d.supplier}`}
+            onClick={() => setOpenId(d.id)}
+            onKeyDown={(e) => {
+              if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
+              e.preventDefault()
+              setOpenId(d.id)
+            }}
+            className="cursor-pointer border-t border-ink/5 transition hover:bg-canvas/60 focus-visible:bg-canvas/60 focus-visible:outline-none"
+          >
           <div
             className="grid grid-cols-[1.3fr_1fr_.7fr_.8fr_.9fr_.7fr_auto] items-center gap-3 px-5 py-[15px] text-[12.5px]"
           >
@@ -218,7 +106,10 @@ export default function DeliveriesPage() {
               {d.invoice_no ? `#${d.invoice_no}` : '—'}
               {d.invoice_pdf_path && (
                 <button
-                  onClick={() => openPdf(d.invoice_pdf_path)}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    openPdf(d.invoice_pdf_path)
+                  }}
                   title={`Open invoice PDF${d.invoice_pages ? ` (${d.invoice_pages} page${d.invoice_pages === 1 ? '' : 's'})` : ''}`}
                   aria-label="Open invoice PDF"
                   className="rounded-md p-0.5 text-[#DB2777] hover:bg-[#DB2777]/10"
@@ -241,7 +132,7 @@ export default function DeliveriesPage() {
             <span>
               <StatusChip text={st.label} color={st.c} bg={st.b} />
             </span>
-            <span className="flex gap-1.5">
+            <span className="flex gap-1.5" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
               {canAct && d.status === 'review' && (
                 <button
                   onClick={() => setVerifying(d)}
@@ -322,6 +213,7 @@ export default function DeliveriesPage() {
     </Card>
     <InvoiceFolder storeId={storeId} />
     {verifying && <VerifyModal delivery={verifying} onClose={() => setVerifying(null)} />}
+    {openDelivery && <DeliveryDetailModal delivery={openDelivery} onClose={() => setOpenId(null)} />}
     </div>
   )
 }
