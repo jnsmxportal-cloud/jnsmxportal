@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Check, ClipboardText, FilePdf, FolderOpen, X } from '@phosphor-icons/react'
+import { Camera, ChatText, Check, ClipboardText, FilePdf, FolderOpen, X } from '@phosphor-icons/react'
 import { Card, StatusChip, deliveryStatusStyle } from '../../components/ui'
 import { useAuth } from '../../auth/AuthProvider'
 import { useDeliveries, useInvoices, useReviewDelivery } from '../../data/hooks'
@@ -178,6 +178,24 @@ export default function DeliveriesPage() {
               )}
             </span>
           </div>
+          {(d.remarks?.trim() || d.photo_count > 0) && (
+            <div className="flex items-start gap-x-5 gap-y-1 px-5 pb-2.5 text-[11.5px] text-slate">
+              {d.remarks?.trim() && (
+                <span className="flex min-w-0 flex-1 items-start gap-1.5" title={d.remarks}>
+                  <ChatText size={13} weight="fill" className="mt-px flex-none text-muted" />
+                  <span className="line-clamp-2 min-w-0 [overflow-wrap:anywhere]">
+                    <span className="text-muted">Remarks </span>
+                    <span className="text-ink">“{d.remarks.trim()}”</span>
+                  </span>
+                </span>
+              )}
+              {d.photo_count > 0 && (
+                <span className="flex flex-none items-center gap-1 text-muted">
+                  <Camera size={13} weight="fill" /> {d.photo_count} photo{d.photo_count === 1 ? '' : 's'}
+                </span>
+              )}
+            </div>
+          )}
           {verified && (
             <div className="flex flex-wrap gap-x-5 gap-y-1 bg-canvas/60 px-5 pb-3 pt-1 text-[11.5px] text-slate">
               <span>
