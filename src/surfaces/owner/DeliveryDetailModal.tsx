@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { format } from 'date-fns'
-import { Check, ClipboardText, FilePdf, X } from '@phosphor-icons/react'
+import { Check, CircleNotch, ClipboardText, FilePdf, X } from '@phosphor-icons/react'
 import { StatusChip, deliveryStatusStyle } from '../../components/ui'
 import { useAuth } from '../../auth/AuthProvider'
 import { useReviewDelivery, useVerifyDelivery } from '../../data/hooks'
@@ -160,9 +160,10 @@ export function VerifyModal({ delivery, onClose }: { delivery: Delivery; onClose
             )
           }
           disabled={verify.isPending}
-          className="w-full rounded-xl bg-brand p-3 text-[13.5px] font-semibold text-white disabled:opacity-60"
+          className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand p-3 text-[13.5px] font-semibold text-white disabled:opacity-60"
         >
-          Complete verification
+          {verify.isPending && <CircleNotch size={16} weight="bold" className="animate-spin" />}
+          {verify.isPending ? 'Verifying…' : 'Complete verification'}
         </button>
       </div>
     </div>
