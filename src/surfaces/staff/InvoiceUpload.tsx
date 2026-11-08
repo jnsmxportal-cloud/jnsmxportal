@@ -6,6 +6,7 @@ import { format } from 'date-fns'
 import { supabase, ORG_ID } from '../../lib/supabase'
 import { useAuth } from '../../auth/AuthProvider'
 import { useInvoices } from '../../data/hooks'
+import { useSupplierNames } from '../../data/suppliers'
 import { audit } from '../../data/ops'
 import { timeAgo } from '../../lib/format'
 import { useToast } from '../../components/Toast'
@@ -13,7 +14,6 @@ import InvoicePages, { useInvoicePages } from '../../components/InvoicePages'
 import { useStaffStore } from './StaffShell'
 import { buildInvoicePdf, invoicePdfPath } from '../../lib/invoicePdf'
 
-const suppliers = ['Booker', 'Coca-Cola Enterprises', 'Nisa', 'Bestway', 'Other']
 
 export default function InvoiceUpload() {
   const navigate = useNavigate()
@@ -21,7 +21,11 @@ export default function InvoiceUpload() {
   const qc = useQueryClient()
   const { session } = useAuth()
   const store = useStaffStore()
-  const [supplier, setSupplier] = useState(suppliers[0])
+  // the owner's supplier list (Admin → Suppliers) plus "Other" for one-off invoices
+  const { names: supplierNames } = useSupplierNames()
+  const suppliers = [...supplierNames, 'Other']
+  const [pickedSupplier, setSupplier] = useState('')
+  const supplier = suppliers.includes(pickedSupplier) ? pickedSupplier : suppliers[0]
   const [invoiceNo, setInvoiceNo] = useState('')
   const invoicePages = useInvoicePages()
   const [busy, setBusy] = useState(false)

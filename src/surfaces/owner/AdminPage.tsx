@@ -16,6 +16,7 @@ import {
   QrCode as QrIcon,
   ShieldCheck,
   Tag,
+  Truck,
   Thermometer,
   Trash,
   Users as UsersIcon,
@@ -43,6 +44,7 @@ import { timeAgo } from '../../lib/format'
 import { useToast } from '../../components/Toast'
 import TemplateEditor from './TemplateEditor'
 import CategoriesPanel from './CategoriesPanel'
+import SuppliersPanel from './SuppliersPanel'
 import TasksPanel from './TasksPanel'
 import RolesPanel from './RolesPanel'
 import UnitQrModal, { printQrLabel } from './UnitQrModal'
@@ -51,7 +53,7 @@ import { qrFileName, unitQrPayload, zoneQrPayload } from '../../lib/qr'
 import { categoryMeta, useCategories } from '../../data/categories'
 import type { AppRole, Profile, Store, StoreUnit, TaskInstance } from '../../lib/types'
 
-const tabs = ['Templates', 'Tasks', 'Categories', 'Users', 'Roles', 'Units', 'QR codes', 'Geofence'] as const
+const tabs = ['Templates', 'Tasks', 'Categories', 'Suppliers', 'Users', 'Roles', 'Units', 'QR codes', 'Geofence'] as const
 type Tab = (typeof tabs)[number]
 
 const roleLabels: Record<AppRole, string> = {
@@ -954,6 +956,7 @@ const tabParams: Record<string, Tab> = {
   templates: 'Templates',
   tasks: 'Tasks',
   categories: 'Categories',
+  suppliers: 'Suppliers',
   users: 'Users',
   roles: 'Roles',
   units: 'Units',
@@ -970,6 +973,7 @@ export default function AdminPage() {
     Templates: PencilSimple,
     Tasks: ListChecks,
     Categories: Tag,
+    Suppliers: Truck,
     Users: UsersIcon,
     Roles: ShieldCheck,
     Units: Thermometer,
@@ -997,6 +1001,7 @@ export default function AdminPage() {
       {tab === 'Templates' && <TemplatesPanel />}
       {tab === 'Tasks' && <TasksPanel />}
       {tab === 'Categories' && <CategoriesPanel />}
+      {tab === 'Suppliers' && <SuppliersPanel />}
       {tab === 'Users' && <UsersPanel />}
       {tab === 'Roles' && <RolesPanel />}
       {tab === 'Units' && <UnitsPanel />}

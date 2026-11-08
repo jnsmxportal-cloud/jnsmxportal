@@ -10,6 +10,7 @@ import {
 } from '@phosphor-icons/react'
 import { useAuth } from '../../auth/AuthProvider'
 import { useSubmitDelivery } from '../../data/hooks'
+import { useSupplierNames } from '../../data/suppliers'
 import { compressImage } from '../../lib/image'
 import { buildInvoicePdf } from '../../lib/invoicePdf'
 import { useToast } from '../../components/Toast'
@@ -17,7 +18,6 @@ import InvoicePages, { useInvoicePages } from '../../components/InvoicePages'
 import GeoChip, { GeoNotice, useGeofence } from './GeoChip'
 import { useStaffStore } from './StaffShell'
 
-const suppliers = ['Booker', 'Coca-Cola Enterprises', 'Nisa', 'Bestway']
 const stepNames = ['Details', 'Invoice & goods', 'Remarks', 'Review']
 
 export default function DeliveryWizard() {
@@ -29,7 +29,10 @@ export default function DeliveryWizard() {
   const submit = useSubmitDelivery()
 
   const [step, setStep] = useState(0)
-  const [supplier, setSupplier] = useState(suppliers[0])
+  // the owner's supplier list (Admin → Suppliers); until staff pick one, the first is preselected
+  const { names: supplierNames, loading: suppliersLoading } = useSupplierNames()
+  const [pickedSupplier, setSupplier] = useState('')
+  const supplier = supplierNames.includes(pickedSupplier) ? pickedSupplier : (supplierNames[0] ?? '')
   const [invoice, setInvoice] = useState('')
   const [hasDiscrepancy, setHasDiscrepancy] = useState<boolean | null>(null)
   const [qty, setQty] = useState('')
@@ -191,7 +194,10 @@ export default function DeliveryWizard() {
             <div>
               <label className={label}>Supplier</label>
               <select value={supplier} onChange={(e) => setSupplier(e.target.value)} className={inputCls}>
-                {suppliers.map((s) => (
+                {supplierNames.length === 0 && (
+                  <option value="">{suppliersLoading ? 'Loading suppliers…' : 'No suppliers set up — ask your manager'}</option>
+                )}
+                {supplierNames.map((s) => (
                   <option key={s}>{s}</option>
                 ))}
               </select>
@@ -447,6 +453,7 @@ export default function DeliveryWizard() {
           onClick={next}
           disabled={
             submit.isPending ||
+            (step === 0 && !supplier) ||
             (step === 2 && !!discrepancyMissing) ||
             (step === 3 && (blocked || pagesProcessing))
           }
