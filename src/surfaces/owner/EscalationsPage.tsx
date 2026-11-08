@@ -68,20 +68,6 @@ export default function EscalationsPage() {
                 <button
                   onClick={() =>
                     resolve.mutate(
-                      { id: e.id, status: 'investigating' },
-                      {
-                        onSuccess: () => toast('Marked as investigating', 'info'),
-                        onError: (err) => toast(err.message, 'error'),
-                      },
-                    )
-                  }
-                  className="rounded-[10px] bg-ink px-4 py-2 text-[12.5px] font-semibold text-white"
-                >
-                  {e.status === 'investigating' ? 'Investigating…' : 'Investigate'}
-                </button>
-                <button
-                  onClick={() =>
-                    resolve.mutate(
                       { id: e.id, status: 'resolved' },
                       {
                         onSuccess: () => toast('Escalation resolved'),
@@ -89,7 +75,8 @@ export default function EscalationsPage() {
                       },
                     )
                   }
-                  className="rounded-[10px] border border-ink/15 bg-white px-4 py-2 text-[12.5px] font-semibold text-slate"
+                  disabled={resolve.isPending}
+                  className="rounded-[10px] bg-ink px-4 py-2 text-[12.5px] font-semibold text-white disabled:opacity-60"
                 >
                   Mark resolved
                 </button>

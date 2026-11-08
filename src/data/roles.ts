@@ -37,7 +37,7 @@ export type PermissionKey =
 export const PERMISSIONS: { key: PermissionKey; label: string; help: string; group: string }[] = [
   { key: 'tasks.create', label: 'Create tasks', help: 'The + button and “New task”: raise one-off tasks for a store', group: 'Tasks' },
   { key: 'tasks.review', label: 'Approve, reject & reopen submissions', help: 'Act on tasks waiting for review', group: 'Tasks' },
-  { key: 'escalations.resolve', label: 'Investigate & resolve escalations', help: 'Close missed-deadline escalations', group: 'Tasks' },
+  { key: 'escalations.resolve', label: 'Resolve escalations', help: 'Close missed-deadline escalations', group: 'Tasks' },
   { key: 'deliveries.log', label: 'Log deliveries', help: 'Delivery Received wizard', group: 'Store operations' },
   { key: 'temp.log', label: 'Record temperature logs', help: 'Chiller / freezer readings', group: 'Store operations' },
   { key: 'incidents.report', label: 'Report incidents', help: 'Incident Report form', group: 'Store operations' },
