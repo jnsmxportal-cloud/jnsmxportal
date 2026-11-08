@@ -80,9 +80,18 @@ export function useSetTaskStatus() {
   const qc = useQueryClient()
   const { session } = useAuth()
   return useMutation({
-    mutationFn: async (args: { instance: TaskInstance; action: 'cancel' | 'reopen' }) => {
+    mutationFn: async (args: {
+      instance: TaskInstance
+      action: 'cancel' | 'reopen'
+      /** reopen only: who redoes it — a user id, null = anyone at the store; undefined = unchanged */
+      assignTo?: string | null
+      /** reopen only: note shown to staff in the task's "Reopened" banner */
+      feedback?: string
+    }) => {
       const uid = session!.user.id
       const { instance, action } = args
+      const reassign = action === 'reopen' && args.assignTo !== undefined
+      const assignee = reassign ? (args.assignTo ?? null) : instance.assigned_to
       const patch: Record<string, unknown> =
         action === 'cancel'
           ? { status: 'cancelled' }
@@ -98,22 +107,30 @@ export function useSetTaskStatus() {
               // review stamp = "sent back": staff see it in their Reopened section (no feedback here)
               reviewed_at: new Date().toISOString(),
               reviewed_by: uid,
-              review_feedback: null,
+              review_feedback: args.feedback?.trim() || null,
+              assigned_to: assignee,
             }
       const { error } = await supabase.from('task_instances').update(patch).eq('id', instance.id)
       if (error) throw error
-      if (instance.assigned_to) {
-        await notify([instance.assigned_to], {
+      if (assignee) {
+        await notify([assignee], {
           org_id: ORG_ID,
           type: action === 'cancel' ? 'cancelled' : 'assigned',
-          title: action === 'cancel' ? `Cancelled: ${instance.title}` : `Reopened: ${instance.title}`,
-          body: null,
+          title:
+            action === 'cancel'
+              ? `Cancelled: ${instance.title}`
+              : assignee !== instance.assigned_to
+                ? `Reopened and assigned to you: ${instance.title}`
+                : `Reopened: ${instance.title}`,
+          body: action === 'reopen' ? args.feedback?.trim() || null : null,
           deep_link: '/staff/tasks',
           icon: action === 'cancel' ? 'x-circle' : 'arrow-counter-clockwise',
         } as never)
       }
       await audit(uid, action === 'cancel' ? 'task.cancelled' : 'task.reopened', 'task_instance', instance.id, {
         from: instance.status,
+        ...(reassign ? { assigned_to: assignee, previous_assignee: instance.assigned_to } : {}),
+        ...(action === 'reopen' && args.feedback?.trim() ? { feedback: args.feedback.trim() } : {}),
       })
     },
     onSuccess: () => qc.invalidateQueries(),

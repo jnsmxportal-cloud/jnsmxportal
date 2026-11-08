@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   ArrowCounterClockwise,
@@ -23,6 +23,7 @@ import { useReviewTask } from '../../data/hooks'
 import { useToast } from '../../components/Toast'
 import { useAuth } from '../../auth/AuthProvider'
 import { useProfiles } from '../../data/hooks'
+import { useUserStoreRoles } from '../../data/admin'
 import { evidenceSignedUrl, useEvidence, type EvidenceRow } from '../../data/ownerExtras'
 
 type Kindish = TaskInstance | { category: TaskCategory; is_temperature_log?: boolean }
@@ -297,6 +298,117 @@ export function evidenceSummary(t: TaskInstance): string {
   return parts.length ? parts.join(' · ') : 'submission details'
 }
 
+/**
+ * People a task at `storeId` can be assigned to: everyone with a role at that store, sorted by
+ * name. `keep` ids (e.g. the current assignee, the person who submitted it) always stay listed
+ * even if they have since moved store; `includeSupervisors` adds owners and managers too.
+ */
+export function useStorePeople(
+  storeId: string,
+  keep: (string | null | undefined)[] = [],
+  includeSupervisors = false,
+) {
+  const { data: profiles } = useProfiles()
+  const { data: roles } = useUserStoreRoles()
+  const keepKey = keep.filter(Boolean).join(',')
+  return useMemo(() => {
+    const keepIds = new Set(keepKey ? keepKey.split(',') : [])
+    const atStore = new Set((roles ?? []).filter((r) => r.store_id === storeId).map((r) => r.user_id))
+    return (profiles ?? [])
+      .filter(
+        (p) =>
+          atStore.has(p.id) ||
+          keepIds.has(p.id) ||
+          (includeSupervisors && (p.role === 'owner' || p.role === 'manager')),
+      )
+      .sort((a, b) => a.full_name.localeCompare(b.full_name))
+  }, [profiles, roles, storeId, keepKey, includeSupervisors])
+}
+
+/**
+ * Reopen a task and choose who redoes it: the person who handed it in (the default), someone
+ * else at the store, or anyone at the store (unassigned). Used by the review actions (feedback
+ * required) and by Admin → Tasks for missed / cancelled tasks (feedback optional).
+ */
+export function ReopenModal({
+  task,
+  feedbackRequired,
+  busy,
+  onConfirm,
+  onClose,
+}: {
+  task: TaskInstance
+  feedbackRequired: boolean
+  busy?: boolean
+  onConfirm: (args: { assignTo: string | null; feedback: string }) => void
+  onClose: () => void
+}) {
+  const people = useStorePeople(task.store_id, [task.submitted_by, task.assigned_to])
+  const { storeName } = useNames()
+  const [assignee, setAssignee] = useState<string>(task.submitted_by ?? task.assigned_to ?? '')
+  const [text, setText] = useState('')
+  const ok = !busy && (!feedbackRequired || !!text.trim())
+  const tag = (id: string) =>
+    id === task.submitted_by ? ' · handed it in' : id === task.assigned_to ? ' · currently assigned' : ''
+
+  return (
+    <div onClick={onClose} className="fixed inset-0 z-[80] flex items-center justify-center bg-navy/50 p-3 sm:p-6">
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="max-h-[calc(100dvh-24px)] w-[420px] max-w-full animate-fade overflow-y-auto rounded-[20px] bg-white p-6 shadow-[0_30px_80px_rgba(0,0,0,.3)]"
+      >
+        <h3 className="mb-1 text-[17px] font-bold">Reopen task</h3>
+        <div className="mb-4 text-[12.5px] text-muted">
+          “{task.title}” goes back to staff to redo — whoever you pick gets a notification straight away.
+        </div>
+
+        <label className="mb-1.5 block text-xs font-semibold text-slate">Assign to</label>
+        <select
+          value={assignee}
+          onChange={(e) => setAssignee(e.target.value)}
+          className="mb-1 w-full rounded-xl border-[1.5px] border-ink/15 bg-white p-2.5 text-[13.5px] outline-none focus:border-brand"
+        >
+          <option value="">Anyone at {storeName(task.store_id)} · unassigned</option>
+          {people.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.full_name}
+              {tag(p.id)}
+            </option>
+          ))}
+        </select>
+        <div className="mb-4 text-[11px] text-muted">
+          Keep the same person, or pick someone else at the store.
+        </div>
+
+        <label className="mb-1.5 block text-xs font-semibold text-slate">
+          Feedback{feedbackRequired ? '' : ' (optional)'}
+        </label>
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder={feedbackRequired ? 'What needs redoing? (required)…' : 'What needs doing?…'}
+          className="mb-4 h-[100px] w-full resize-none rounded-xl border-[1.5px] border-ink/15 p-3 text-[13.5px] outline-none focus:border-brand"
+        />
+        <div className="flex gap-2.5">
+          <button
+            onClick={onClose}
+            className="flex-1 rounded-xl border border-ink/15 bg-white p-2.5 text-[13.5px] font-semibold text-slate"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => ok && onConfirm({ assignTo: assignee || null, feedback: text.trim() })}
+            disabled={!ok}
+            className="flex-1 rounded-xl bg-[#F59E0B] p-2.5 text-[13.5px] font-semibold text-white disabled:opacity-50"
+          >
+            Reopen
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function FeedbackModal({
   title,
   sub,
@@ -364,6 +476,7 @@ export function ApprovalActions({
   const review = useReviewTask()
   const toast = useToast()
   const { can } = useAuth()
+  const { userName } = useNames()
   const [modal, setModal] = useState<'rejected' | 'reopened' | null>(null)
 
   if (!can('tasks.review'))
@@ -373,16 +486,22 @@ export function ApprovalActions({
       </div>
     )
 
-  const act = (verdict: 'approved' | 'rejected' | 'reopened', feedback?: string) => {
+  const act = (verdict: 'approved' | 'rejected' | 'reopened', feedback?: string, assignTo?: string | null) => {
     review.mutate(
-      { instance: task, verdict, feedback },
+      { instance: task, verdict, feedback, assignTo },
       {
         onSuccess: () => {
           if (verdict === 'approved')
             toast('Approved · archived & staged for EPOS sync', 'success')
           else if (verdict === 'rejected')
             toast('Rejected · returned to staff with feedback', 'error')
-          else toast('Reopened · re-assigned instantly with feedback', 'warn')
+          else
+            toast(
+              assignTo
+                ? `Reopened · assigned to ${userName(assignTo)} with feedback`
+                : 'Reopened · open to anyone at the store, with feedback',
+              'warn',
+            )
           setModal(null)
           onDone?.()
         },
@@ -417,13 +536,22 @@ export function ApprovalActions({
           Reopen
         </button>
       </div>
-      {modal && (
+      {modal === 'rejected' && (
         <FeedbackModal
-          title={modal === 'rejected' ? 'Reject submission' : 'Reopen task'}
+          title="Reject submission"
           sub={`“${task.title}” — feedback is sent to the staff member instantly with a push notification.`}
-          confirmLabel={modal === 'rejected' ? 'Reject' : 'Reopen'}
-          confirmColor={modal === 'rejected' ? '#E5484D' : '#F59E0B'}
-          onConfirm={(text) => act(modal, text)}
+          confirmLabel="Reject"
+          confirmColor="#E5484D"
+          onConfirm={(text) => act('rejected', text)}
+          onClose={() => setModal(null)}
+        />
+      )}
+      {modal === 'reopened' && (
+        <ReopenModal
+          task={task}
+          feedbackRequired
+          busy={review.isPending}
+          onConfirm={({ assignTo, feedback }) => act('reopened', feedback, assignTo)}
           onClose={() => setModal(null)}
         />
       )}

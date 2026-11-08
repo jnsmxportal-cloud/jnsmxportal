@@ -15,8 +15,8 @@ import { Card, PrioBadge } from '../../components/ui'
 import { DateTimeField, HoursField } from '../../components/TimeField'
 import { useToast } from '../../components/Toast'
 import { useAuth } from '../../auth/AuthProvider'
-import { useProfiles, useTasks } from '../../data/hooks'
-import { useTemplates, useUserStoreRoles } from '../../data/admin'
+import { useTasks } from '../../data/hooks'
+import { useTemplates } from '../../data/admin'
 import {
   isOpenStatus,
   useBulkTasks,
@@ -27,7 +27,14 @@ import {
 } from '../../data/taskAdmin'
 import { dueLabel, timeAgo } from '../../lib/format'
 import type { TaskInstance, TaskPriority } from '../../lib/types'
-import { statusStyleOf, taskStatusStyle as statusStyle, useKindMeta, useNames } from './shared'
+import {
+  ReopenModal,
+  statusStyleOf,
+  taskStatusStyle as statusStyle,
+  useKindMeta,
+  useNames,
+  useStorePeople,
+} from './shared'
 import { TaskDetailModal } from './TaskDetailModal'
 
 /**
@@ -112,6 +119,7 @@ export default function TasksPanel() {
   const [age, setAge] = useState<AgeFilter>('any')
   const [editing, setEditing] = useState<TaskInstance | null>(null)
   const [deleting, setDeleting] = useState<TaskInstance | null>(null)
+  const [reopening, setReopening] = useState<TaskInstance | null>(null)
   const [viewing, setViewing] = useState<TaskInstance | null>(null)
   // tidy-up: ticked task ids, and the bulk action being confirmed
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
@@ -172,11 +180,18 @@ export default function TasksPanel() {
   const toggleAll = () => setSelected(allShownPicked ? new Set() : new Set(list.map((t) => t.id)))
   const cancellable = picked.filter(canCancel)
 
-  const reopen = (t: TaskInstance) =>
+  const reopen = (t: TaskInstance, assignTo: string | null, feedback: string) =>
     setStatus.mutate(
-      { instance: t, action: 'reopen' },
+      { instance: t, action: 'reopen', assignTo, feedback },
       {
-        onSuccess: () => toast(`“${t.title}” reopened for staff`),
+        onSuccess: () => {
+          toast(
+            assignTo
+              ? `“${t.title}” reopened · assigned to ${userName(assignTo)}`
+              : `“${t.title}” reopened for anyone at the store`,
+          )
+          setReopening(null)
+        },
         onError: (e) => toast(e.message, 'error'),
       },
     )
@@ -409,7 +424,7 @@ export default function TasksPanel() {
                   )}
                   {(t.status === 'missed' || t.status === 'cancelled') && (
                     <button
-                      onClick={() => reopen(t)}
+                      onClick={() => setReopening(t)}
                       title="Reopen for staff"
                       className="rounded-lg p-1.5 text-slate hover:bg-canvas"
                     >
@@ -432,6 +447,15 @@ export default function TasksPanel() {
 
       {editing && <TaskEditModal task={editing} onClose={() => setEditing(null)} />}
       {deleting && <DeleteTaskModal task={deleting} onClose={() => setDeleting(null)} />}
+      {reopening && (
+        <ReopenModal
+          task={reopening}
+          feedbackRequired={false}
+          busy={setStatus.isPending}
+          onConfirm={({ assignTo, feedback }) => reopen(reopening, assignTo, feedback)}
+          onClose={() => setReopening(null)}
+        />
+      )}
       {viewing && <TaskDetailModal task={viewing} onClose={() => setViewing(null)} />}
       {bulk && (
         <BulkTaskModal
@@ -600,8 +624,6 @@ const prios: TaskPriority[] = ['low', 'medium', 'high', 'critical']
 function TaskEditModal({ task, onClose }: { task: TaskInstance; onClose: () => void }) {
   const toast = useToast()
   const update = useUpdateTask()
-  const { data: profiles } = useProfiles()
-  const { data: roles } = useUserStoreRoles()
   const { storeName } = useNames()
   const [title, setTitle] = useState(task.title)
   const [priority, setPriority] = useState<TaskPriority>(task.priority)
@@ -611,12 +633,7 @@ function TaskEditModal({ task, onClose }: { task: TaskInstance; onClose: () => v
 
   // people who work at this task's store (any role), owner/manager included so a task can be
   // pinned on a supervisor; the current assignee always stays selectable
-  const people = useMemo(() => {
-    const atStore = new Set((roles ?? []).filter((r) => r.store_id === task.store_id).map((r) => r.user_id))
-    return (profiles ?? [])
-      .filter((p) => atStore.has(p.id) || p.role === 'owner' || p.role === 'manager' || p.id === task.assigned_to)
-      .sort((a, b) => a.full_name.localeCompare(b.full_name))
-  }, [profiles, roles, task.store_id, task.assigned_to])
+  const people = useStorePeople(task.store_id, [task.assigned_to], true)
 
   const save = () => {
     if (!title.trim()) {

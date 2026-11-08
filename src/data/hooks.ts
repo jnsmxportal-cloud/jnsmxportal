@@ -248,9 +248,12 @@ export function useReviewTask() {
       instance: TaskInstance
       verdict: 'approved' | 'rejected' | 'reopened'
       feedback?: string
+      /** reopen only: who redoes it — a user id, null = anyone at the store; undefined = unchanged */
+      assignTo?: string | null
     }) => {
       const uid = session!.user.id
       const { instance, verdict, feedback } = args
+      const reassign = verdict === 'reopened' && args.assignTo !== undefined
       const status =
         verdict === 'approved' ? 'completed' : verdict === 'rejected' ? 'rejected' : 'assigned'
       const patch: Partial<TaskInstance> & Record<string, unknown> = {
@@ -260,6 +263,7 @@ export function useReviewTask() {
         review_feedback: feedback ?? null,
       }
       if (verdict === 'approved') patch.completed_at = new Date().toISOString()
+      if (reassign) patch.assigned_to = args.assignTo ?? null
       const { error } = await supabase.from('task_instances').update(patch).eq('id', instance.id)
       if (error) throw error
       await supabase.from('approvals').insert({
@@ -269,8 +273,10 @@ export function useReviewTask() {
         verdict,
         feedback: feedback ?? null,
       })
-      if (instance.submitted_by) {
-        await notify([instance.submitted_by], {
+      // a reopen picked for someone else goes to them; otherwise whoever handed it in hears back
+      const recipient = reassign && args.assignTo ? args.assignTo : instance.submitted_by
+      if (recipient) {
+        await notify([recipient], {
           org_id: ORG_ID,
           type: verdict,
           title:
@@ -278,13 +284,18 @@ export function useReviewTask() {
               ? `“${instance.title}” approved`
               : verdict === 'rejected'
                 ? `“${instance.title}” rejected`
-                : `“${instance.title}” reopened`,
+                : recipient !== instance.submitted_by
+                  ? `“${instance.title}” reopened — assigned to you`
+                  : `“${instance.title}” reopened`,
           body: feedback ?? null,
           deep_link: '/staff/tasks',
           icon: verdict === 'approved' ? 'seal-check' : 'arrow-counter-clockwise',
         } as never)
       }
-      await audit(uid, `task.${verdict}`, 'task_instance', instance.id, { feedback })
+      await audit(uid, `task.${verdict}`, 'task_instance', instance.id, {
+        feedback,
+        ...(reassign ? { assigned_to: args.assignTo ?? null, previous_assignee: instance.assigned_to } : {}),
+      })
     },
     onSuccess: () => qc.invalidateQueries(),
   })
