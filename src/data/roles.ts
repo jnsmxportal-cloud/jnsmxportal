@@ -42,7 +42,7 @@ export const PERMISSIONS: { key: PermissionKey; label: string; help: string; gro
   { key: 'temp.log', label: 'Record temperature logs', help: 'Chiller / freezer readings', group: 'Store operations' },
   { key: 'incidents.report', label: 'Report incidents', help: 'Incident Report form', group: 'Store operations' },
   { key: 'invoices.upload', label: 'Upload invoices', help: 'Scan and file supplier invoices', group: 'Store operations' },
-  { key: 'deliveries.verify', label: 'Verify deliveries', help: 'Cost, final quantity and EPOS check before owner approval', group: 'Back office' },
+  { key: 'deliveries.verify', label: 'Verify deliveries', help: 'Cost and EPOS check before owner approval', group: 'Back office' },
   { key: 'deliveries.approve', label: 'Approve verified deliveries', help: 'Final sign-off that archives the delivery', group: 'Back office' },
   { key: 'rota.manage', label: 'Edit the rota', help: 'Add, change and copy shifts', group: 'Management' },
   { key: 'reports.view', label: 'View reports & analytics', help: 'Compliance and activity reports', group: 'Management' },

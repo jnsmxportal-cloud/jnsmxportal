@@ -140,7 +140,7 @@ export default function DeliveryWizard() {
                 icon: 'truck',
                 color: '#E5484D',
                 title: 'Delivery submitted · issue escalated',
-                msg: `${issueSummary} — escalated to the Owner and the escalation team. The delivery still goes to Remote Office for cost & quantity verification (36h SLA).`,
+                msg: `${issueSummary} — escalated to the Owner and the escalation team. The delivery still goes to Remote Office for cost verification (36h SLA).`,
               },
             })
             return
@@ -151,7 +151,7 @@ export default function DeliveryWizard() {
               icon: 'truck',
               color: '#3B82F6',
               title: 'Delivery submitted',
-              msg: 'Record created and pushed to Remote Office for cost & quantity verification (36h SLA). You’ll be notified when it’s approved.',
+              msg: 'Record created and pushed to Remote Office for cost verification (36h SLA). You’ll be notified when it’s approved.',
             },
           })
         },
@@ -440,7 +440,7 @@ export default function DeliveryWizard() {
                 ...(hasIssue
                   ? [{ n: 2, text: 'Delivery issue escalated to the Owner & escalation team', alert: true }]
                   : []),
-                { n: hasIssue ? 3 : 2, text: 'Remote Office verifies cost & quantity (36h SLA)' },
+                { n: hasIssue ? 3 : 2, text: 'Remote Office verifies the cost (36h SLA)' },
                 { n: hasIssue ? 4 : 3, text: 'Owner approves → archived for EPOS' },
               ].map((s: { n: number; text: string; done?: boolean; alert?: boolean }, i) => (
                 <div key={s.n}>

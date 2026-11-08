@@ -79,9 +79,17 @@ function GoodsPhotos({ deliveryId }: { deliveryId: string }) {
 export function VerifyModal({ delivery, onClose }: { delivery: Delivery; onClose: () => void }) {
   const verify = useVerifyDelivery()
   const toast = useToast()
-  const [cost, setCost] = useState((delivery.cost ?? delivery.invoice_total)?.toString() ?? '')
-  const [qty, setQty] = useState('')
+  const [cost, setCost] = useState(
+    delivery.cost ?? delivery.invoice_total ? Number(delivery.cost ?? delivery.invoice_total).toFixed(2) : '',
+  )
   const [epos, setEpos] = useState(false)
+  /** Money input: digits and one decimal point, at most 2 decimals (a comma is read as the point). */
+  const onCost = (raw: string) => {
+    const v = raw.replace(',', '.').replace(/[^0-9.]/g, '')
+    const [whole, ...rest] = v.split('.')
+    setCost(rest.length ? `${whole}.${rest.join('').slice(0, 2)}` : whole)
+  }
+  const costNum = cost === '' || cost === '.' ? null : Number(cost)
   const [shortages, setShortages] = useState(
     deliveryIssueText(delivery) ? `${deliveryIssueText(delivery)} per staff report` : '',
   )
@@ -96,21 +104,30 @@ export function VerifyModal({ delivery, onClose }: { delivery: Delivery; onClose
           <button onClick={onClose} className="p-1 text-muted"><X size={18} /></button>
         </div>
         <div className="mb-4 text-xs text-muted">
-          {delivery.supplier} · Inv #{delivery.invoice_no} — Remote Office step: confirm cost &amp;
-          quantity, then it goes to the Owner for approval.
+          {delivery.supplier} · Inv #{delivery.invoice_no} — Remote Office step: confirm the cost, then
+          it goes to the Owner for approval.
         </div>
         <label className={label}>Invoice scan</label>
         <InvoiceScan delivery={delivery} />
         <label className={label}>Goods photos from the store</label>
         <GoodsPhotos deliveryId={delivery.id} />
-        <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div>
-            <label className={label}>Cost per original invoice (£)</label>
-            <input value={cost} onChange={(e) => setCost(e.target.value)} inputMode="decimal" className={inputCls} />
-          </div>
-          <div>
-            <label className={label}>Final quantity (units)</label>
-            <input value={qty} onChange={(e) => setQty(e.target.value)} inputMode="numeric" className={inputCls} />
+        <div className="mb-3">
+          <label className={label} htmlFor="verify-cost">
+            Cost per original invoice (£)
+          </label>
+          <div className="relative">
+            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted">
+              £
+            </span>
+            <input
+              id="verify-cost"
+              value={cost}
+              onChange={(e) => onCost(e.target.value)}
+              onBlur={() => costNum !== null && setCost(costNum.toFixed(2))}
+              inputMode="decimal"
+              placeholder="0.00"
+              className={`${inputCls} pl-7 tabular-nums`}
+            />
           </div>
         </div>
         <label className={label}>Stock shortages</label>
@@ -129,8 +146,7 @@ export function VerifyModal({ delivery, onClose }: { delivery: Delivery; onClose
             verify.mutate(
               {
                 delivery,
-                cost: cost ? parseFloat(cost) : null,
-                finalQty: qty ? parseInt(qty, 10) : null,
+                cost: costNum,
                 eposUpdated: epos,
                 stockShortages: shortages,
               },
@@ -248,7 +264,6 @@ export function DeliveryDetailModal({ delivery, onClose }: { delivery: Delivery;
             <label className={label}>Remote Office verification</label>
             <div className="mb-3 grid grid-cols-2 gap-x-4 gap-y-3 rounded-[14px] border border-ink/10 p-3.5">
               <Fact k="Cost">{money(delivery.cost)}</Fact>
-              <Fact k="Final qty">{delivery.final_qty ?? '—'}</Fact>
               <Fact k="EPOS updated">
                 <span className={delivery.epos_updated ? 'text-success' : 'text-danger'}>
                   {delivery.epos_updated ? 'Yes' : 'No'}
@@ -273,7 +288,7 @@ export function DeliveryDetailModal({ delivery, onClose }: { delivery: Delivery;
             </button>
           ) : (
             <div className="mt-1 rounded-[10px] bg-warn-soft px-3 py-2.5 text-[11.5px] font-semibold text-amber">
-              Waiting for Remote Office to verify cost &amp; quantity
+              Waiting for Remote Office to verify the cost
             </div>
           ))}
 

@@ -319,7 +319,7 @@ export function useReviewDelivery() {
   })
 }
 
-/** Remote-Office review step (FR-6.4 step 2): cost & quantity verification -> Owner approval. */
+/** Remote-Office review step (FR-6.4 step 2): cost verification -> Owner approval. */
 export function useVerifyDelivery() {
   const qc = useQueryClient()
   const { session } = useAuth()
@@ -327,7 +327,6 @@ export function useVerifyDelivery() {
     mutationFn: async (args: {
       delivery: Delivery
       cost: number | null
-      finalQty: number | null
       eposUpdated: boolean
       stockShortages: string
     }) => {
@@ -336,7 +335,6 @@ export function useVerifyDelivery() {
         .from('deliveries')
         .update({
           cost: args.cost,
-          final_qty: args.finalQty,
           epos_updated: args.eposUpdated,
           stock_shortages: args.stockShortages || null,
           status: 'verified',
@@ -350,13 +348,12 @@ export function useVerifyDelivery() {
         org_id: ORG_ID,
         type: 'delivery',
         title: `Delivery verified — ${args.delivery.supplier}`,
-        body: 'Cost & quantity confirmed by Remote Office. Awaiting your approval.',
+        body: 'Cost confirmed by Remote Office. Awaiting your approval.',
         deep_link: '/owner/deliveries',
         icon: 'truck',
       } as never)
       await audit(uid, 'delivery.verified', 'delivery', args.delivery.id, {
         cost: args.cost,
-        final_qty: args.finalQty,
         epos_updated: args.eposUpdated,
       })
     },

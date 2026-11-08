@@ -187,9 +187,6 @@ export default function DeliveriesPage() {
                 </b>
               </span>
               <span>
-                Final qty <b className="text-ink">{d.final_qty ?? '—'}</b>
-              </span>
-              <span>
                 EPOS updated{' '}
                 <b className={d.epos_updated ? 'text-success' : 'text-danger'}>
                   {d.epos_updated ? 'Yes' : 'No'}
