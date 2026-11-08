@@ -17,6 +17,7 @@ import {
 import { Card, SectionHead, StatusChip, deliveryStatusStyle } from '../../components/ui'
 import { useAuth } from '../../auth/AuthProvider'
 import { useDeliveries, useEscalations, useProfiles, useTasks } from '../../data/hooks'
+import { deliveryIssueText } from '../../lib/deliveryIssues'
 import type { TaskInstance } from '../../lib/types'
 import { dueLabel, timeAgo } from '../../lib/format'
 import { useOwnerCtx } from './OwnerLayout'
@@ -265,16 +266,16 @@ export default function Dashboard() {
                   <div
                     className="hidden text-xs sm:block"
                     style={{
-                      color: d.discrepancy_units > 0 ? '#E5484D' : '#8B93A4',
-                      fontWeight: d.discrepancy_units > 0 ? 700 : 400,
+                      color: deliveryIssueText(d) ? '#E5484D' : '#8B93A4',
+                      fontWeight: deliveryIssueText(d) ? 700 : 400,
                     }}
                   >
-                    {d.discrepancy_units > 0 ? `${d.discrepancy_units} short` : '—'}
+                    {deliveryIssueText(d) ?? '—'}
                   </div>
                   <div className="col-span-2 text-[11.5px] text-muted sm:col-span-1">
                     {userName(d.submitted_by)} · {timeAgo(d.submitted_at)}
-                    {d.discrepancy_units > 0 && (
-                      <span className="font-bold text-danger sm:hidden"> · {d.discrepancy_units} short</span>
+                    {deliveryIssueText(d) && (
+                      <span className="font-bold text-danger sm:hidden"> · {deliveryIssueText(d)}</span>
                     )}
                   </div>
                   <StatusChip text={st.label} color={st.c} bg={st.b} />

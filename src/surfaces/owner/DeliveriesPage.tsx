@@ -8,6 +8,7 @@ import { useToast } from '../../components/Toast'
 import { useOwnerCtx } from './OwnerLayout'
 import { useNames } from './shared'
 import { DeliveryDetailModal, VerifyModal, useOpenInvoicePdf } from './DeliveryDetailModal'
+import { deliveryIssueText } from '../../lib/deliveryIssues'
 import type { Delivery } from '../../lib/types'
 
 function InvoiceFolder({ storeId }: { storeId: string | 'all' }) {
@@ -73,7 +74,7 @@ export default function DeliveriesPage() {
         <span>Supplier</span>
         <span>Store</span>
         <span>Invoice</span>
-        <span>Discrepancy</span>
+        <span>Issues</span>
         <span>Logged by</span>
         <span>Status</span>
         <span />
@@ -120,11 +121,11 @@ export default function DeliveriesPage() {
             </span>
             <span
               style={{
-                color: d.discrepancy_units > 0 ? '#E5484D' : '#8B93A4',
-                fontWeight: d.discrepancy_units > 0 ? 700 : 400,
+                color: deliveryIssueText(d) ? '#E5484D' : '#8B93A4',
+                fontWeight: deliveryIssueText(d) ? 700 : 400,
               }}
             >
-              {d.discrepancy_units > 0 ? `${d.discrepancy_units} short` : '—'}
+              {deliveryIssueText(d) ?? '—'}
             </span>
             <span className="text-muted">
               {userName(d.submitted_by)} · {timeAgo(d.submitted_at)}

@@ -11,6 +11,7 @@ import {
 import { useAuth } from '../../auth/AuthProvider'
 import { useSubmitDelivery } from '../../data/hooks'
 import { useSupplierNames } from '../../data/suppliers'
+import { DELIVERY_ISSUES, deliveryIssueText, type DeliveryIssue } from '../../lib/deliveryIssues'
 import { compressImage } from '../../lib/image'
 import { buildInvoicePdf } from '../../lib/invoicePdf'
 import { useToast } from '../../components/Toast'
@@ -35,6 +36,8 @@ export default function DeliveryWizard() {
   const supplier = supplierNames.includes(pickedSupplier) ? pickedSupplier : (supplierNames[0] ?? '')
   const [invoice, setInvoice] = useState('')
   const [hasDiscrepancy, setHasDiscrepancy] = useState<boolean | null>(null)
+  // what kind of issue(s) — a delivery can be short AND damaged, so several can be picked
+  const [issues, setIssues] = useState<DeliveryIssue[]>([])
   const [qty, setQty] = useState('')
   const [remarks, setRemarks] = useState('')
   const [photos, setPhotos] = useState<{ blob: Blob; url: string }[]>([])
@@ -43,17 +46,22 @@ export default function DeliveryWizard() {
   const pagesProcessing = invoicePages.processing
 
   const qtyNum = parseInt(qty || '0', 10)
-  /** Units short — only counts when staff answered "Yes" (a "No" ignores any stale number). */
+  /** Units affected — only counts when staff answered "Yes" (a "No" ignores any stale number). */
   const unitsShort = hasDiscrepancy && !Number.isNaN(qtyNum) ? qtyNum : 0
-  // step 3: an explicit Yes/No; "Yes" needs a unit count and remarks
+  const pickedIssues = hasDiscrepancy ? issues : []
+  const hasIssue = pickedIssues.length > 0
+  const issueSummary = deliveryIssueText({ issue_types: pickedIssues, discrepancy_units: unitsShort })
+  // step 3: an explicit Yes/No; "Yes" needs at least one issue type and remarks (units optional)
   const discrepancyMissing =
     hasDiscrepancy === null
-      ? 'Choose Yes or No for quantity discrepancy'
-      : hasDiscrepancy && unitsShort < 1
-        ? 'Enter how many units are short'
+      ? 'Choose Yes or No for delivery issues'
+      : hasDiscrepancy && !hasIssue
+        ? 'Pick what kind of issue it is'
         : hasDiscrepancy && !remarks.trim()
-          ? 'Add remarks describing the discrepancy'
+          ? 'Add remarks describing the issue'
           : null
+  const toggleIssue = (k: DeliveryIssue) =>
+    setIssues((cur) => (cur.includes(k) ? cur.filter((x) => x !== k) : [...cur, k]))
   const blocked = geo?.verdict === 'off_site'
   const inputCls =
     'w-full rounded-xl border-[1.5px] border-ink/15 bg-white p-3 text-sm outline-none focus:border-brand'
@@ -104,6 +112,7 @@ export default function DeliveryWizard() {
         supplier,
         invoiceNo: invoice,
         discrepancy: unitsShort,
+        issueTypes: pickedIssues,
         remarks: remarks.trim(),
         photoCount: photos.length,
         photos: photos.map((p) => p.blob),
@@ -124,14 +133,14 @@ export default function DeliveryWizard() {
             })
             return
           }
-          if (unitsShort > 0) {
-            toast('Discrepancy escalated to the Owner', 'info')
+          if (hasIssue) {
+            toast('Delivery issue escalated to the Owner', 'info')
             navigate('/staff/success', {
               state: {
                 icon: 'truck',
                 color: '#E5484D',
-                title: 'Delivery submitted · discrepancy escalated',
-                msg: `${unitsShort} unit(s) short has been escalated to the Owner and the escalation team. The delivery still goes to Remote Office for cost & quantity verification (36h SLA).`,
+                title: 'Delivery submitted · issue escalated',
+                msg: `${issueSummary} — escalated to the Owner and the escalation team. The delivery still goes to Remote Office for cost & quantity verification (36h SLA).`,
               },
             })
             return
@@ -270,11 +279,11 @@ export default function DeliveryWizard() {
         {step === 2 && (
           <div className="flex flex-col gap-3.5">
             <div>
-              <label className={label}>Is there a quantity discrepancy?</label>
-              <div className="grid grid-cols-2 gap-2.5" role="radiogroup" aria-label="Quantity discrepancy">
+              <label className={label}>Any issues or discrepancies with this delivery?</label>
+              <div className="grid grid-cols-2 gap-2.5" role="radiogroup" aria-label="Delivery issues">
                 {([
-                  [false, 'No', 'Delivery matches the invoice'],
-                  [true, 'Yes', 'Items short or missing'],
+                  [false, 'No', 'Everything matches the invoice'],
+                  [true, 'Yes', 'Short, damaged, wrong items or another issue'],
                 ] as const).map(([val, title, sub]) => {
                   const on = hasDiscrepancy === val
                   const danger = val
@@ -306,7 +315,35 @@ export default function DeliveryWizard() {
               <>
                 <div>
                   <label className={label}>
-                    Units short <span className="text-danger">*</span>
+                    What kind of issue? <span className="text-danger">*</span>{' '}
+                    <span className="font-normal text-muted">(pick all that apply)</span>
+                  </label>
+                  <div className="flex flex-wrap gap-2" role="group" aria-label="Issue types">
+                    {DELIVERY_ISSUES.map((it) => {
+                      const on = issues.includes(it.key)
+                      return (
+                        <button
+                          key={it.key}
+                          type="button"
+                          aria-pressed={on}
+                          onClick={() => toggleIssue(it.key)}
+                          className="flex items-center gap-1 rounded-full border-[1.5px] px-3 py-[7px] text-[12.5px] font-semibold"
+                          style={{
+                            borderColor: on ? '#E5484D' : 'rgba(21,27,40,.15)',
+                            background: on ? '#FDECEC' : '#fff',
+                            color: on ? '#C62F34' : '#3D4556',
+                          }}
+                        >
+                          {on && <Check size={12} weight="bold" />}
+                          {it.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+                <div>
+                  <label className={label}>
+                    Units affected <span className="font-normal text-muted">(optional)</span>
                   </label>
                   <input
                     value={qty}
@@ -337,7 +374,7 @@ export default function DeliveryWizard() {
                   onChange={(e) => setRemarks(e.target.value)}
                   placeholder={
                     hasDiscrepancy
-                      ? 'What is short or missing? e.g. 6 × Coke 500ml missing from case'
+                      ? 'Describe the issue, e.g. 6 × Coke 500ml missing, 2 cases of milk split'
                       : 'Anything unusual about this delivery…'
                   }
                   className="h-[90px] w-full resize-none rounded-xl border-[1.5px] border-ink/15 bg-white p-3 text-sm outline-none focus:border-brand"
@@ -368,10 +405,13 @@ export default function DeliveryWizard() {
                     <span className="font-semibold">{v}</span>
                   </div>
                 ))}
-                <div className="flex justify-between">
-                  <span className="text-muted">Discrepancy</span>
-                  <span className="font-semibold" style={{ color: unitsShort > 0 ? '#E5484D' : '#151B28' }}>
-                    {unitsShort > 0 ? `Yes · ${unitsShort} short` : 'No'}
+                <div className="flex justify-between gap-4">
+                  <span className="flex-none text-muted">Issues</span>
+                  <span
+                    className="text-right font-semibold [overflow-wrap:anywhere]"
+                    style={{ color: hasIssue ? '#E5484D' : '#151B28' }}
+                  >
+                    {issueSummary ?? 'None'}
                   </span>
                 </div>
                 {remarks.trim() && (
@@ -397,11 +437,11 @@ export default function DeliveryWizard() {
               </div>
               {[
                 { n: 1, text: 'You submit — record created', done: true },
-                ...(unitsShort > 0
-                  ? [{ n: 2, text: 'Discrepancy escalated to the Owner & escalation team', alert: true }]
+                ...(hasIssue
+                  ? [{ n: 2, text: 'Delivery issue escalated to the Owner & escalation team', alert: true }]
                   : []),
-                { n: unitsShort > 0 ? 3 : 2, text: 'Remote Office verifies cost & quantity (36h SLA)' },
-                { n: unitsShort > 0 ? 4 : 3, text: 'Owner approves → archived for EPOS' },
+                { n: hasIssue ? 3 : 2, text: 'Remote Office verifies cost & quantity (36h SLA)' },
+                { n: hasIssue ? 4 : 3, text: 'Owner approves → archived for EPOS' },
               ].map((s: { n: number; text: string; done?: boolean; alert?: boolean }, i) => (
                 <div key={s.n}>
                   {i > 0 && <div className="ml-3 h-3.5 w-0.5 bg-[#c9d6f0]" />}

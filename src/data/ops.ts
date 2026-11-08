@@ -2,6 +2,7 @@ import Dexie, { type Table } from 'dexie'
 import { supabase, ORG_ID } from '../lib/supabase'
 import { triggerFanout } from '../lib/push'
 import { invoicePdfPath as invoicePdfPathFor } from '../lib/invoicePdf'
+import { deliveryIssueText } from '../lib/deliveryIssues'
 import { effectivePermissions, type PermissionKey, type Role } from './roles'
 import type { AppNotification, AppRole, StoreUnit, TaskInstance } from '../lib/types'
 
@@ -277,7 +278,10 @@ export interface DeliveryArgs {
   storeId: string
   supplier: string
   invoiceNo: string
+  /** units affected by the issue(s); 0 when none / not counted */
   discrepancy: number
+  /** delivery issue keys (lib/deliveryIssues); older queued ops lack it and only had units short */
+  issueTypes?: string[]
   remarks: string
   photoCount: number
   photos: Blob[]
@@ -291,6 +295,10 @@ export interface DeliveryArgs {
 
 export async function submitDeliveryCore(uid: string, args: DeliveryArgs, deviceTs?: string) {
   const ts = deviceTs ?? new Date().toISOString()
+  const issueTypes = args.issueTypes?.length ? args.issueTypes : args.discrepancy > 0 ? ['short'] : []
+  const hasIssue = issueTypes.length > 0
+  // e.g. "Damaged, Short / missing · 6 units"
+  const issueText = deliveryIssueText({ issue_types: issueTypes, discrepancy_units: args.discrepancy }) ?? ''
   // Invoice PDF first, so the delivery row can point at it. Filed in the invoice folder
   // exactly like Invoice Upload; the timestamped path stays unique on an offline retry.
   let invoicePdfPath: string | null = null
@@ -312,6 +320,7 @@ export async function submitDeliveryCore(uid: string, args: DeliveryArgs, device
       supplier: args.supplier,
       invoice_no: args.invoiceNo || null,
       discrepancy_units: args.discrepancy,
+      issue_types: issueTypes,
       remarks: args.remarks || null,
       photo_count: args.photos.length,
       status: 'review',
@@ -354,13 +363,13 @@ export async function submitDeliveryCore(uid: string, args: DeliveryArgs, device
     })
     if (evidenceError) throw evidenceError
   }
-  if (args.discrepancy > 0) {
+  if (hasIssue) {
     const { error: escError } = await supabase.from('escalations').insert({
       org_id: ORG_ID,
       store_id: args.storeId,
       source: 'delivery_discrepancy',
-      title: `Delivery discrepancy — ${args.supplier}${args.invoiceNo ? ` (Inv #${args.invoiceNo})` : ''}`,
-      detail: `${args.discrepancy} unit(s) short on delivery. ${args.remarks || ''}`.trim(),
+      title: `Delivery issue — ${args.supplier}${args.invoiceNo ? ` (Inv #${args.invoiceNo})` : ''}`,
+      detail: `${issueText}. ${args.remarks || ''}`.trim(),
       level: 'high',
       stage: 'owner',
       status: 'open',
@@ -368,7 +377,7 @@ export async function submitDeliveryCore(uid: string, args: DeliveryArgs, device
       action_due_at: new Date(Date.now() + 24 * 3600e3).toISOString(),
     })
     if (escError) throw escError
-    // "Yes" to a discrepancy: alert the owner(s) + everyone with the escalation permission
+    // "Yes" to a delivery issue: alert the owner(s) + everyone with the escalation permission
     const recips = await permissionHolders('escalations.resolve', args.storeId)
     await notify(
       recips.map((p) => ({
@@ -378,30 +387,28 @@ export async function submitDeliveryCore(uid: string, args: DeliveryArgs, device
       {
         org_id: ORG_ID,
         type: 'escalation',
-        title: `Delivery discrepancy — ${args.supplier}${args.invoiceNo ? ` (Inv #${args.invoiceNo})` : ''}`,
-        body: `${args.discrepancy} unit(s) short. ${args.remarks || ''}`.trim().slice(0, 160),
+        title: `Delivery issue — ${args.supplier}${args.invoiceNo ? ` (Inv #${args.invoiceNo})` : ''}`,
+        body: `${issueText}. ${args.remarks || ''}`.trim().slice(0, 160),
         deep_link: '/owner/escalations',
         icon: 'warning-octagon',
       } as never,
     )
   }
-  // Remote Office always verifies; the owner already has the escalation when there's a discrepancy
+  // Remote Office always verifies; the owner already has the escalation when there's an issue
   await notify(
-    await reviewers(args.discrepancy > 0 ? ['remote_office'] : ['owner', 'remote_office']),
+    await reviewers(hasIssue ? ['remote_office'] : ['owner', 'remote_office']),
     {
       org_id: ORG_ID,
       type: 'delivery',
       title: `Delivery logged — ${args.supplier}`,
-      body:
-        args.discrepancy > 0
-          ? `Quantity discrepancy: ${args.discrepancy} short`
-          : 'Awaiting Remote Office review (36h SLA)',
+      body: hasIssue ? `Delivery issue: ${issueText}` : 'Awaiting Remote Office review (36h SLA)',
       deep_link: '/owner/deliveries',
       icon: 'truck',
     } as never,
   )
   await audit(uid, 'delivery.submitted', 'delivery', deliveryId, {
     discrepancy: args.discrepancy,
+    issue_types: issueTypes,
     photos: args.photos.length,
     invoice_pages: invoicePdfPath ? args.invoicePages ?? null : 0,
   })

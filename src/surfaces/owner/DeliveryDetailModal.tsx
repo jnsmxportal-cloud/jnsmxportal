@@ -9,6 +9,7 @@ import { timeAgo } from '../../lib/format'
 import { useToast } from '../../components/Toast'
 import { EvidencePhoto, useNames } from './shared'
 import { useDeliveryEvidence } from '../../data/ownerExtras'
+import { deliveryIssueText } from '../../lib/deliveryIssues'
 import type { Delivery } from '../../lib/types'
 
 const shell = 'fixed inset-0 z-[80] flex items-center justify-center bg-navy/50 p-3 sm:p-6'
@@ -82,7 +83,7 @@ export function VerifyModal({ delivery, onClose }: { delivery: Delivery; onClose
   const [qty, setQty] = useState('')
   const [epos, setEpos] = useState(false)
   const [shortages, setShortages] = useState(
-    delivery.discrepancy_units > 0 ? `${delivery.discrepancy_units} unit(s) short per staff count` : '',
+    deliveryIssueText(delivery) ? `${deliveryIssueText(delivery)} per staff report` : '',
   )
   const inputCls =
     'w-full rounded-xl border-[1.5px] border-ink/15 bg-white p-2.5 text-sm outline-none focus:border-brand'
@@ -176,7 +177,7 @@ export function DeliveryDetailModal({ delivery, onClose }: { delivery: Delivery;
   const [verifying, setVerifying] = useState(false)
   const st = deliveryStatusStyle[delivery.status]
   const verified = delivery.status === 'verified' || delivery.status === 'approved'
-  const short = delivery.discrepancy_units > 0
+  const issueText = deliveryIssueText(delivery)
 
   if (verifying) return <VerifyModal delivery={delivery} onClose={onClose} />
 
@@ -217,9 +218,9 @@ export function DeliveryDetailModal({ delivery, onClose }: { delivery: Delivery;
             {userName(delivery.submitted_by)}
             <span className="font-normal text-muted"> · {timeAgo(delivery.submitted_at)}</span>
           </Fact>
-          <Fact k="Discrepancy">
-            <span className={short ? 'text-danger' : ''}>
-              {short ? `${delivery.discrepancy_units} short` : 'None'}
+          <Fact k="Issues">
+            <span className={issueText ? 'text-danger' : ''}>
+              {issueText ?? 'None'}
             </span>
           </Fact>
           <Fact k="Invoice date">

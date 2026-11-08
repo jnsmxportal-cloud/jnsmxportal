@@ -133,6 +133,8 @@ export interface Delivery {
   invoice_date: string | null
   invoice_total: number | null
   discrepancy_units: number
+  /** deliveries.issue_types: short · damaged · wrong_item · expired · over · other (see lib/deliveryIssues) */
+  issue_types: string[]
   remarks: string | null
   photo_count: number
   status: DeliveryStatus
