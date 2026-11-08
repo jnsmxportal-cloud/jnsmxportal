@@ -54,6 +54,9 @@ export default function DocScanner({
   const [cameraError, setCameraError] = useState<string | null>(null)
   const [quad, setQuad] = useState<Quad | null>(null) // adjust-mode quad, image coords
   const [imgSize, setImgSize] = useState({ w: 0, h: 0 })
+  // preview of the captured frame, encoded ONCE — re-encoding a full-res frame on every render
+  // (i.e. every pointer move while dragging) made the corner handles crawl
+  const [frameUrl, setFrameUrl] = useState<string | null>(null)
   const [holdPct, setHoldPct] = useState(0) // 0..1 auto-capture progress
   const [busy, setBusy] = useState(false)
 
@@ -79,6 +82,7 @@ export default function DocScanner({
       ? scaleQuad(small, c.width / detW, c.height / Math.round((detW * c.height) / c.width))
       : defaultQuad(c.width, c.height)
     setImgSize({ w: c.width, h: c.height })
+    setFrameUrl(c.toDataURL('image/jpeg', 0.7))
     setQuad(q)
     stopStream()
     setMode('adjust')
@@ -248,6 +252,7 @@ export default function DocScanner({
       const full = q ? scaleQuad(q, c.width / detW, c.height / detH) : defaultQuad(c.width, c.height)
       stopStream()
       setImgSize({ w: c.width, h: c.height })
+      setFrameUrl(c.toDataURL('image/jpeg', 0.7))
       setQuad(full)
       setMode('adjust')
     } catch {
@@ -259,6 +264,7 @@ export default function DocScanner({
 
   const backToCamera = () => {
     frameRef.current = null
+    setFrameUrl(null)
     setQuad(null)
     setMode('camera')
   }
@@ -288,9 +294,29 @@ export default function DocScanner({
   }
 
   // ---- adjust-mode drag handling ----
+  // The preview box is sized in JS to fit the free area at the image's aspect ratio. Handle
+  // positions used to be read from the box's DOM rect during render — on the first adjust render
+  // the box wasn't mounted yet, so no handles were drawn and nothing re-rendered to add them.
+  const adjustAreaRef = useRef<HTMLDivElement>(null)
   const adjustBoxRef = useRef<HTMLDivElement>(null)
-  const dragIdx = useRef<number | null>(null)
-  const [, forceTick] = useState(0)
+  const [fit, setFit] = useState({ w: 0, h: 0 })
+  const [dragging, setDragging] = useState<number | null>(null)
+
+  useEffect(() => {
+    const area = adjustAreaRef.current
+    if (mode !== 'adjust' || !area || !imgSize.w) return
+    const measure = () => {
+      const r = area.getBoundingClientRect()
+      // leave room for the handles, which hang half outside the image at its edges
+      const pad = 22
+      const s = Math.min((r.width - pad * 2) / imgSize.w, (r.height - pad * 2) / imgSize.h)
+      setFit(s > 0 ? { w: Math.floor(imgSize.w * s), h: Math.floor(imgSize.h * s) } : { w: 0, h: 0 })
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(area)
+    return () => ro.disconnect()
+  }, [mode, imgSize.w, imgSize.h])
 
   const toImageCoords = (e: { clientX: number; clientY: number }): Pt | null => {
     const box = adjustBoxRef.current
@@ -302,30 +328,34 @@ export default function DocScanner({
     }
   }
 
-  const onPointerDown = (i: number) => (e: React.PointerEvent) => {
-    dragIdx.current = i
-    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+  const onHandleDown = (i: number) => (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    try {
+      // keeps the drag on this handle even when the finger outruns it
+      e.currentTarget.setPointerCapture(e.pointerId)
+    } catch {
+      /* some browsers throw for an already-released pointer; the drag still works without capture */
+    }
+    setDragging(i)
   }
-  const onPointerMove = (e: React.PointerEvent) => {
-    if (dragIdx.current === null || !quad) return
+  const onHandleMove = (i: number) => (e: React.PointerEvent<HTMLDivElement>) => {
+    if (dragging !== i) return
     const p = toImageCoords(e)
     if (!p) return
-    const next = [...quad] as Quad
-    next[dragIdx.current] = p
-    setQuad(next)
-    forceTick((t) => t + 1)
+    setQuad((q) => {
+      if (!q) return q
+      const next = [...q] as Quad
+      next[i] = p
+      return next
+    })
   }
-  const onPointerUp = () => {
-    dragIdx.current = null
+  const onHandleUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
+    setDragging(null)
   }
 
-  const displayQuad = (): Quad | null => {
-    const box = adjustBoxRef.current
-    if (!box || !quad || !imgSize.w) return null
-    const r = box.getBoundingClientRect()
-    return scaleQuad(quad, r.width / imgSize.w, r.height / imgSize.h)
-  }
-  const dq = mode === 'adjust' ? displayQuad() : null
+  const dq: Quad | null =
+    mode === 'adjust' && quad && imgSize.w && fit.w ? scaleQuad(quad, fit.w / imgSize.w, fit.h / imgSize.h) : null
 
   return (
     <div className="fixed inset-0 z-[90] flex flex-col bg-navy">
@@ -425,43 +455,58 @@ export default function DocScanner({
 
       {mode === 'adjust' && frameRef.current && (
         <>
-          <div className="flex min-h-0 flex-1 items-center justify-center p-4">
+          <div ref={adjustAreaRef} className="flex min-h-0 flex-1 items-center justify-center overflow-hidden">
             <div
               ref={adjustBoxRef}
-              className="relative max-h-full"
-              style={{ aspectRatio: `${imgSize.w} / ${imgSize.h}`, maxWidth: '100%' }}
-              onPointerMove={onPointerMove}
-              onPointerUp={onPointerUp}
+              className="relative flex-none"
+              style={{ width: fit.w, height: fit.h, touchAction: 'none' }}
             >
-              <img
-                src={frameRef.current.toDataURL('image/jpeg', 0.7)}
-                alt="Captured document"
-                className="h-full w-full select-none rounded-lg"
-                draggable={false}
-              />
+              {frameUrl && (
+                <img
+                  src={frameUrl}
+                  alt="Captured document"
+                  className="pointer-events-none block h-full w-full select-none rounded-lg"
+                  draggable={false}
+                />
+              )}
               {dq && (
-                <svg className="absolute inset-0 h-full w-full overflow-visible">
+                <svg
+                  className="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+                  viewBox={`0 0 ${fit.w} ${fit.h}`}
+                >
                   <polygon
                     points={dq.map((p) => `${p.x},${p.y}`).join(' ')}
                     fill="rgba(255,90,45,0.15)"
                     stroke="#FF5A2D"
                     strokeWidth={2}
                   />
-                  {dq.map((p, i) => (
-                    <circle
-                      key={i}
-                      cx={p.x}
-                      cy={p.y}
-                      r={14}
-                      fill="rgba(255,255,255,0.92)"
-                      stroke="#FF5A2D"
-                      strokeWidth={3}
-                      style={{ cursor: 'grab', touchAction: 'none' }}
-                      onPointerDown={onPointerDown(i)}
-                    />
-                  ))}
                 </svg>
               )}
+              {/* corner handles: 48px touch targets (HTML, so touch-action works on iOS too) */}
+              {dq?.map((p, i) => (
+                <div
+                  key={i}
+                  role="slider"
+                  aria-label={`Corner ${i + 1} of 4`}
+                  onPointerDown={onHandleDown(i)}
+                  onPointerMove={onHandleMove(i)}
+                  onPointerUp={onHandleUp}
+                  onPointerCancel={onHandleUp}
+                  className="absolute flex h-12 w-12 items-center justify-center"
+                  style={{
+                    left: p.x,
+                    top: p.y,
+                    transform: 'translate(-50%, -50%)',
+                    touchAction: 'none',
+                    cursor: dragging === i ? 'grabbing' : 'grab',
+                  }}
+                >
+                  <span
+                    className="block rounded-full border-[3px] border-brand bg-white/95 shadow-[0_2px_8px_rgba(0,0,0,.35)] transition-[width,height] duration-100"
+                    style={{ width: dragging === i ? 30 : 24, height: dragging === i ? 30 : 24 }}
+                  />
+                </div>
+              ))}
             </div>
           </div>
           <div className="px-4 pb-1 text-center text-[11.5px] text-white/60">
