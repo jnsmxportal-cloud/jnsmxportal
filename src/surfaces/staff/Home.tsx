@@ -146,14 +146,19 @@ export default function Home() {
   const toast = useToast()
   const { data: myTasks } = useMyTasks()
 
-  // work sent back by a reviewer always shows here (it may have no deadline), then what is due soon
-  const sentBackTasks = (myTasks ?? []).filter((t) => sentBack(t))
-  const dueNow = [
-    ...sentBackTasks,
-    ...(myTasks ?? [])
-      .filter((t) => !sentBack(t) && t.due_at && new Date(t.due_at).getTime() < Date.now() + 4 * 3600e3)
-      .slice(0, 3),
-  ]
+  // Today's work, most urgent first: sent back by a reviewer, overdue, due later today, then
+  // tasks with no deadline (ad-hoc / incident tasks). Anything due on a later day lives on My Tasks.
+  const all = myTasks ?? []
+  const endOfToday = new Date()
+  endOfToday.setHours(23, 59, 59, 999)
+  const rank = (t: TaskInstance) =>
+    sentBack(t) ? 0 : dueLabel(t).overdue ? 1 : t.due_at ? 2 : 3
+  const today = all
+    .filter((t) => sentBack(t) || !t.due_at || new Date(t.due_at) <= endOfToday)
+    .sort((a, b) => rank(a) - rank(b) || (a.due_at ?? '').localeCompare(b.due_at ?? ''))
+  const HOME_LIMIT = 6
+  const dueNow = today.slice(0, HOME_LIMIT)
+  const hiddenCount = all.length - dueNow.length
 
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
@@ -231,10 +236,10 @@ export default function Home() {
       </div>
 
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-[13px] font-bold">Due now</span>
-        {dueNow.some((t) => dueLabel(t).overdue) && (
+        <span className="text-[13px] font-bold">Today</span>
+        {today.some((t) => dueLabel(t).overdue) && (
           <span className="text-[11px] font-semibold text-danger">
-            {dueNow.filter((t) => dueLabel(t).overdue).length} overdue
+            {today.filter((t) => dueLabel(t).overdue).length} overdue
           </span>
         )}
       </div>
@@ -244,8 +249,17 @@ export default function Home() {
         ))}
         {dueNow.length === 0 && (
           <div className="rounded-[14px] border border-line bg-white p-4 text-center text-xs text-muted">
-            Nothing due right now — nice work.
+            {all.length === 0 ? 'No open tasks — nice work.' : 'Nothing due today — nice work.'}
           </div>
+        )}
+        {hiddenCount > 0 && (
+          <button
+            onClick={() => navigate('/staff/tasks')}
+            className="flex items-center justify-center gap-1 rounded-[14px] border border-line bg-white p-3 text-xs font-semibold text-brand-dark"
+          >
+            View all {all.length} tasks
+            <CaretRight size={13} weight="bold" />
+          </button>
         )}
       </div>
 
