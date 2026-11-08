@@ -559,6 +559,34 @@ export function ApprovalActions({
   )
 }
 
+/**
+ * What staff wrote when reporting an incident (kept in the task's description — the same text
+ * the escalation card shows). Renders nothing for other tasks, whose description is the
+ * template's instructions rather than something staff reported.
+ */
+export function IncidentNote({ task, compact }: { task: TaskInstance; compact?: boolean }) {
+  const text = task.category === 'incident' ? task.description?.trim() : ''
+  if (!text) return null
+  return (
+    <div
+      className={`rounded-[10px] border border-danger/20 bg-danger-soft/60 ${
+        compact ? 'mb-2 px-2.5 py-[7px]' : 'mb-3 px-3 py-2.5'
+      }`}
+    >
+      <div className="mb-0.5 flex items-center gap-1 text-[10.5px] font-bold uppercase tracking-wide text-danger">
+        <Warning size={11} weight="fill" /> Reported by staff
+      </div>
+      <div
+        className={`whitespace-pre-wrap leading-relaxed text-ink ${
+          compact ? 'line-clamp-3 text-[12px]' : 'text-[13px]'
+        }`}
+      >
+        {text}
+      </div>
+    </div>
+  )
+}
+
 export function ApprovalCard({ task, onOpen }: { task: TaskInstance; onOpen?: () => void }) {
   const { Icon, c, b } = useKindMeta()(task)
   const { userName, storeName } = useNames()
@@ -585,6 +613,7 @@ export function ApprovalCard({ task, onOpen }: { task: TaskInstance; onOpen?: ()
         <PrioBadge p={task.priority} />
       </Head>
       <ResubmissionNote task={task} compact />
+      <IncidentNote task={task} compact />
       <Head
         onClick={onOpen}
         className="mb-2 flex w-full items-center gap-1.5 rounded-[9px] bg-canvas px-2.5 py-[7px] text-left text-[11.5px] text-slate"

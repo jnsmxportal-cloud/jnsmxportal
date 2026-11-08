@@ -115,7 +115,9 @@ export function TaskDetailModal({ task, onClose }: { task: TaskInstance; onClose
 
           {task.description && (
             <section>
-              <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-muted">Instructions</div>
+              <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-muted">
+                {task.category === 'incident' ? 'Reported by staff' : 'Instructions'}
+              </div>
               <div className="whitespace-pre-wrap text-[13px] leading-relaxed text-slate">{task.description}</div>
             </section>
           )}

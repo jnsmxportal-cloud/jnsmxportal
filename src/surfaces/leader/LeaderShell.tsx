@@ -18,7 +18,7 @@ import {
 } from '../../data/hooks'
 import { timeAgo } from '../../lib/format'
 import { Avatar, Card, PrioBadge } from '../../components/ui'
-import { ApprovalActions, evidenceSummary, useKindMeta, useNames } from '../owner/shared'
+import { ApprovalActions, IncidentNote, evidenceSummary, useKindMeta, useNames } from '../owner/shared'
 
 export default function LeaderShell() {
   const { profile, stores, myStoreIds, signOut } = useAuth()
@@ -175,6 +175,7 @@ export default function LeaderShell() {
                         </div>
                         <PrioBadge p={a.priority} />
                       </div>
+                      <IncidentNote task={a} compact />
                       <div className="mb-3 rounded-[10px] bg-canvas px-3 py-2 text-xs text-slate">
                         {evidenceSummary(a)}
                       </div>

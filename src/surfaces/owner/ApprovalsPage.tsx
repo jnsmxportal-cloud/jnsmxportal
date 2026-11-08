@@ -9,6 +9,7 @@ import {
   ApprovalActions,
   EvidenceGallery,
   evidenceSummary,
+  IncidentNote,
   ResubmissionNote,
   useKindMeta,
   useNames,
@@ -60,6 +61,7 @@ export default function ApprovalsPage() {
                 {t.submitted_at ? timeAgo(t.submitted_at) : ''}
               </div>
               <ResubmissionNote task={t} />
+              <IncidentNote task={t} />
               <div className="mb-3 text-[12.5px] text-slate">{evidenceSummary(t)}</div>
               <div className="mb-3.5">
                 <EvidenceGallery instanceId={t.id} />
