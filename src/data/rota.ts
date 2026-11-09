@@ -173,15 +173,53 @@ export function useKioskCodes(enabled: boolean) {
   })
 }
 
+/** Calls kiosk-admin and surfaces the function's own error message on a non-2xx reply. */
+async function kioskCall<T>(body: Record<string, unknown>): Promise<T> {
+  const { data, error } = await supabase.functions.invoke('kiosk-admin', { body })
+  if (error) {
+    const ctx = (error as { context?: Response }).context
+    if (ctx && typeof ctx.json === 'function') {
+      try {
+        const msg = ((await ctx.json()) as { error?: string }).error
+        if (msg) throw new Error(msg)
+      } catch (e) {
+        if (e instanceof Error && e.message) throw e
+      }
+    }
+    throw error
+  }
+  if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error)
+  return data as T
+}
+
+/** Owner: set a PIN (random when `code` is omitted) or remove it. */
 export function useKioskAdmin() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async (body: { action: 'set' | 'clear'; user_id: string }) => {
-      const { data, error } = await supabase.functions.invoke('kiosk-admin', { body })
-      if (error) throw error
-      if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error)
-      return data as { ok: true; code?: string }
-    },
+    mutationFn: (body: { action: 'set' | 'clear'; user_id: string; code?: string }) =>
+      kioskCall<{ ok: true; code?: string }>(body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['kiosk-codes'] }),
+  })
+}
+
+/** Signed-in user: do I have a sign-in PIN? (the PIN itself is never sent back) */
+export function useMyPin(enabled = true) {
+  return useQuery({
+    queryKey: ['my-pin'],
+    enabled,
+    queryFn: () => kioskCall<{ has_code: boolean; updated_at: string | null }>({ action: 'mine' }),
+  })
+}
+
+/** Signed-in user: choose my own PIN (`current` is required when I already have one). */
+export function useSetMyPin() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { code: string; current?: string }) =>
+      kioskCall<{ ok: true }>({ action: 'set_own', ...body }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['my-pin'] })
+      qc.invalidateQueries({ queryKey: ['kiosk-codes'] })
+    },
   })
 }

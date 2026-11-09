@@ -9,6 +9,7 @@ import {
 import { useAuth } from '../../auth/AuthProvider'
 import { Avatar } from '../../components/ui'
 import { useStaffStore } from './StaffShell'
+import PinCard from './PinCard'
 import { useToast } from '../../components/Toast'
 import { usePendingOps } from '../../data/hooks'
 import { useMyShifts } from '../../data/rota'
@@ -103,6 +104,8 @@ export default function Profile() {
           </div>
         )}
       </div>
+
+      <PinCard />
 
       <div className="mb-3.5 rounded-2xl bg-navy p-4 text-white">
         <div className="mb-1.5 flex items-center gap-2">

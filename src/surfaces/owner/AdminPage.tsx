@@ -40,6 +40,7 @@ import {
 } from '../../data/admin'
 import { useKioskAdmin, useKioskCodes } from '../../data/rota'
 import { geoErrorReason, geoReasonHelp } from '../../lib/geo'
+import { pinInput, pinProblem } from '../../lib/pin'
 import { timeAgo } from '../../lib/format'
 import { useToast } from '../../components/Toast'
 import TemplateEditor from './TemplateEditor'
@@ -318,27 +319,21 @@ function TemplatesPanel() {
 }
 
 // ================= Users =================
-function KioskCodeChip({
-  code,
-  busy,
-  onGenerate,
-  onClear,
-}: {
-  code: string | null
-  busy: boolean
-  onGenerate: () => void
-  onClear: () => void
-}) {
+/**
+ * The member's staff PIN: tap the chip to show / hide it. Changing or removing it only happens
+ * inside PinModal — there are no one-tap regenerate / delete buttons that are easy to hit by
+ * accident on a phone (that is how codes kept "changing by themselves").
+ */
+function KioskCodeChip({ code, onManage }: { code: string | null; onManage: () => void }) {
   const [visible, setVisible] = useState(false)
   if (!code)
     return (
       <button
-        onClick={onGenerate}
-        disabled={busy}
-        className="flex items-center gap-1.5 rounded-lg bg-brand-tint px-3 py-1.5 text-xs font-semibold text-brand-dark disabled:opacity-50"
-        title="Issue a 6-digit kiosk sign-in code"
+        onClick={onManage}
+        className="flex items-center gap-1.5 rounded-lg bg-brand-tint px-3 py-1.5 text-xs font-semibold text-brand-dark"
+        title="Set a 6-digit sign-in PIN"
       >
-        <Password size={13} /> Issue code
+        <Password size={13} /> Set PIN
       </button>
     )
   return (
@@ -346,26 +341,134 @@ function KioskCodeChip({
       <button
         onClick={() => setVisible((v) => !v)}
         className="rounded-lg border border-ink/15 bg-canvas px-2.5 py-1.5 font-mono text-xs font-bold tracking-[.15em] text-ink"
-        title={visible ? 'Hide code' : 'Show code'}
+        title={visible ? 'Hide PIN' : 'Show PIN'}
       >
         {visible ? code : '••••••'}
       </button>
       <button
-        onClick={onGenerate}
-        disabled={busy}
-        className="rounded-lg p-1.5 text-slate disabled:opacity-50"
-        title="Regenerate code"
+        onClick={onManage}
+        className="rounded-lg px-2 py-1.5 text-[11.5px] font-semibold text-slate"
+        title="Change or remove this PIN"
       >
-        <ArrowsClockwise size={14} />
+        Change
       </button>
-      <button
-        onClick={onClear}
-        disabled={busy}
-        className="rounded-lg p-1.5 text-danger disabled:opacity-50"
-        title="Remove code"
+    </div>
+  )
+}
+
+function PinModal({ user, code, onClose }: { user: Profile; code: string | null; onClose: () => void }) {
+  const kiosk = useKioskAdmin()
+  const toast = useToast()
+  const [pin, setPin] = useState('')
+  const [confirmRemove, setConfirmRemove] = useState(false)
+  const problem = pin ? pinProblem(pin) : null
+  const busy = kiosk.isPending
+
+  const save = (chosen?: string) =>
+    kiosk.mutate(
+      { action: 'set', user_id: user.id, code: chosen },
+      {
+        onSuccess: (r) => {
+          toast(`PIN for ${user.full_name}: ${r.code}`)
+          onClose()
+        },
+        onError: (e) => toast(e.message, 'error'),
+      },
+    )
+
+  const remove = () =>
+    kiosk.mutate(
+      { action: 'clear', user_id: user.id },
+      {
+        onSuccess: () => {
+          toast(`PIN removed for ${user.full_name}`)
+          onClose()
+        },
+        onError: (e) => toast(e.message, 'error'),
+      },
+    )
+
+  return (
+    <div onClick={onClose} className="fixed inset-0 z-[80] flex items-center justify-center bg-navy/50 p-3 sm:p-6">
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-[400px] max-w-full animate-fade rounded-[20px] bg-white p-6 shadow-[0_30px_80px_rgba(0,0,0,.3)]"
       >
-        <Trash size={14} />
-      </button>
+        <div className="mb-1 flex items-center justify-between">
+          <h3 className="text-[17px] font-bold">Sign-in PIN · {user.full_name}</h3>
+          <button onClick={onClose} className="p-1 text-muted" aria-label="Close"><X size={18} /></button>
+        </div>
+        <div className="mb-4 text-xs text-muted">
+          {code ? (
+            <>
+              Current PIN <b className="font-mono tracking-[.15em] text-ink">{code}</b>. The old PIN stops
+              working as soon as you save a new one.
+            </>
+          ) : (
+            'They type this 6-digit PIN on the “Staff code” keypad to sign in. Staff can also change it themselves under Profile.'
+          )}
+        </div>
+
+        <label className="mb-1.5 block text-xs font-semibold text-slate" htmlFor="pin-new">
+          {code ? 'New PIN' : 'PIN'}
+        </label>
+        <input
+          id="pin-new"
+          value={pin}
+          onChange={(e) => setPin(pinInput(e.target.value))}
+          inputMode="numeric"
+          autoComplete="off"
+          placeholder="6 digits"
+          className="w-full rounded-xl border-[1.5px] border-ink/15 bg-white p-3 font-mono text-lg tracking-[.3em] outline-none focus:border-brand"
+        />
+        <div className={`mb-3 mt-1 min-h-[16px] text-[11px] ${problem && pin.length === 6 ? 'text-danger' : 'text-muted'}`}>
+          {pin.length === 6 ? problem ?? 'Looks good' : 'Avoid easy PINs like 123456 or 111111.'}
+        </div>
+
+        <button
+          onClick={() => save(pin)}
+          disabled={busy || pin.length !== 6 || !!problem}
+          className="mb-2 w-full rounded-xl bg-brand p-3 text-[13.5px] font-semibold text-white disabled:opacity-50"
+        >
+          {busy ? 'Saving…' : 'Save this PIN'}
+        </button>
+        <button
+          onClick={() => save()}
+          disabled={busy}
+          className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-ink/15 p-2.5 text-[13px] font-semibold text-slate disabled:opacity-50"
+        >
+          <ArrowsClockwise size={14} /> Generate a random PIN
+        </button>
+
+        {code && (
+          <div className="mt-4 border-t border-ink/5 pt-3">
+            {confirmRemove ? (
+              <div className="flex items-center gap-2">
+                <span className="flex-1 text-xs text-danger">
+                  {user.full_name} won’t be able to sign in with a PIN.
+                </span>
+                <button onClick={() => setConfirmRemove(false)} className="px-2 py-1.5 text-xs font-semibold text-slate">
+                  Cancel
+                </button>
+                <button
+                  onClick={remove}
+                  disabled={busy}
+                  className="rounded-lg bg-danger px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                >
+                  Remove
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmRemove(true)}
+                className="flex items-center gap-1.5 text-xs font-semibold text-danger"
+              >
+                <Trash size={13} /> Remove PIN
+              </button>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -377,7 +480,8 @@ function UserModal({ user, onClose }: { user: Profile | null; onClose: () => voi
   const { data: roles } = useRoles()
   const toast = useToast()
   const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('StoreOps!2026')
+  // no default: every new account gets its own password (the old shared demo one is public)
+  const [password, setPassword] = useState('')
   const [name, setName] = useState(user?.full_name ?? '')
   const [roleId, setRoleId] = useState<string>(user?.role_id ?? '')
   const [storeIds, setStoreIds] = useState<string[]>(
@@ -420,7 +524,16 @@ function UserModal({ user, onClose }: { user: Profile | null; onClose: () => voi
             <label className={label}>Email</label>
             <input value={email} onChange={(e) => setEmail(e.target.value)} className={`${inputCls} mb-3`} placeholder="name@store.com" />
             <label className={label}>Temporary password</label>
-            <input value={password} onChange={(e) => setPassword(e.target.value)} className={`${inputCls} mb-3`} />
+            <input
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className={`${inputCls} mb-1`}
+              placeholder="At least 8 characters"
+              autoComplete="new-password"
+            />
+            <div className="mb-3 text-[11px] text-muted">
+              Staff can also sign in with a 6-digit staff code — issue one from the Users list.
+            </div>
           </>
         )}
         <label className={label}>Full name</label>
@@ -462,7 +575,7 @@ function UserModal({ user, onClose }: { user: Profile | null; onClose: () => voi
         </div>
         <button
           onClick={submit}
-          disabled={admin.isPending || (!user && (!email || !name))}
+          disabled={admin.isPending || (!user && (!email || !name || password.length < 8))}
           className="w-full rounded-xl bg-brand p-3 text-[13.5px] font-semibold text-white disabled:opacity-50"
         >
           {user ? 'Save changes' : 'Create account'}
@@ -481,14 +594,14 @@ function UsersPanel() {
   const [modal, setModal] = useState<Profile | null | 'new'>(null)
   const isOwner = me?.role === 'owner'
   const { data: kioskCodes } = useKioskCodes(isOwner)
-  const kiosk = useKioskAdmin()
-  const toast = useToast()
+  const codeOf = (userId: string) => (kioskCodes ?? []).find((k) => k.user_id === userId)?.code ?? null
+  const [pinFor, setPinFor] = useState<Profile | null>(null)
 
   return (
     <div>
       <div className="mb-3.5 flex items-center justify-between">
         <div className="text-[12.5px] text-muted">
-          {(profiles ?? []).length} team members · staff codes give one-tap kiosk sign-in
+          {(profiles ?? []).length} team members · tap “Change” next to a PIN to set or reset it
         </div>
         <button
           onClick={() => setModal('new')}
@@ -521,28 +634,7 @@ function UsersPanel() {
                 </div>
               </div>
               {isOwner && (
-                <KioskCodeChip
-                  code={(kioskCodes ?? []).find((k) => k.user_id === p.id)?.code ?? null}
-                  busy={kiosk.isPending && kiosk.variables?.user_id === p.id}
-                  onGenerate={() =>
-                    kiosk.mutate(
-                      { action: 'set', user_id: p.id },
-                      {
-                        onSuccess: (r) => toast(`Staff code for ${p.full_name}: ${r.code}`),
-                        onError: (e) => toast(e.message, 'error'),
-                      },
-                    )
-                  }
-                  onClear={() =>
-                    kiosk.mutate(
-                      { action: 'clear', user_id: p.id },
-                      {
-                        onSuccess: () => toast(`Staff code removed for ${p.full_name}`),
-                        onError: (e) => toast(e.message, 'error'),
-                      },
-                    )
-                  }
-                />
+                <KioskCodeChip code={codeOf(p.id)} onManage={() => setPinFor(p)} />
               )}
               <button
                 onClick={() => setModal(p)}
@@ -555,6 +647,7 @@ function UsersPanel() {
         })}
       </Card>
       {modal && <UserModal user={modal === 'new' ? null : modal} onClose={() => setModal(null)} />}
+      {pinFor && <PinModal user={pinFor} code={codeOf(pinFor.id)} onClose={() => setPinFor(null)} />}
     </div>
   )
 }

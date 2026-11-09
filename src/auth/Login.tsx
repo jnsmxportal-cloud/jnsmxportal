@@ -2,13 +2,6 @@ import { useRef, useState } from 'react'
 import { Storefront, Lightning, CircleNotch, Backspace } from '@phosphor-icons/react'
 import { supabase } from '../lib/supabase'
 
-const demoAccounts = [
-  { label: 'Owner · Gareeth', email: 'gareeth@storeops.demo' },
-  { label: 'Team Leader · Ken', email: 'ken@storeops.demo' },
-  { label: 'Staff · Amara', email: 'amara@storeops.demo' },
-  { label: 'Manager · Maya', email: 'maya@storeops.demo' },
-]
-
 function CodePad({
   onSubmit,
   busy,
@@ -219,25 +212,6 @@ export default function Login() {
                 {busy && <CircleNotch size={17} className="animate-spin" />}
                 Sign in
               </button>
-
-              <div className="mt-6 border-t border-line pt-5">
-                <div className="mb-2.5 text-center text-[10.5px] font-bold uppercase tracking-wider text-muted">
-                  Demo accounts · password StoreOps!2026
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  {demoAccounts.map((a) => (
-                    <button
-                      key={a.email}
-                      type="button"
-                      disabled={busy}
-                      onClick={() => signIn(a.email, 'StoreOps!2026')}
-                      className="rounded-xl border border-ink/10 bg-canvas px-2 py-2.5 text-[11.5px] font-semibold text-ink hover:border-brand/50 hover:bg-brand-tint"
-                    >
-                      {a.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
             </form>
           )}
         </div>
