@@ -60,5 +60,5 @@ export { useUserStoreRoles, type UserStoreRole } from './admin'
 /** Presence rule: online iff is_online AND last_seen_at within the last 5 minutes. */
 export function isOnline(p: Profile): boolean {
   const seen = (p as Profile & { last_seen_at?: string | null }).last_seen_at
-  return !!p.is_online && !!seen && Date.now() - new Date(seen).getTime() < 5 * 60_000
+  return !p.deactivated_at && !!p.is_online && !!seen && Date.now() - new Date(seen).getTime() < 5 * 60_000
 }

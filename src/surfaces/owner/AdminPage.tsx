@@ -389,7 +389,7 @@ function PinModal({ user, code, onClose }: { user: Profile; code: string | null;
     )
 
   return (
-    <div onClick={onClose} className="fixed inset-0 z-[80] flex items-center justify-center bg-navy/50 p-3 sm:p-6">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-navy/50 p-3 sm:p-6">
       <div
         onClick={(e) => e.stopPropagation()}
         className="w-[400px] max-w-full animate-fade rounded-[20px] bg-white p-6 shadow-[0_30px_80px_rgba(0,0,0,.3)]"
@@ -474,7 +474,7 @@ function PinModal({ user, code, onClose }: { user: Profile; code: string | null;
 }
 
 function UserModal({ user, onClose }: { user: Profile | null; onClose: () => void }) {
-  const { stores } = useAuth()
+  const { stores, profile: me } = useAuth()
   const { data: usr } = useUserStoreRoles()
   const admin = useAdminUsers()
   const { data: roles } = useRoles()
@@ -510,7 +510,7 @@ function UserModal({ user, onClose }: { user: Profile | null; onClose: () => voi
   }
 
   return (
-    <div onClick={onClose} className="fixed inset-0 z-[80] flex items-center justify-center bg-navy/50 p-6">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-navy/50 p-6">
       <div
         onClick={(e) => e.stopPropagation()}
         className="w-[440px] max-w-full animate-fade rounded-[20px] bg-white p-6 shadow-[0_30px_80px_rgba(0,0,0,.3)]"
@@ -580,7 +580,121 @@ function UserModal({ user, onClose }: { user: Profile | null; onClose: () => voi
         >
           {user ? 'Save changes' : 'Create account'}
         </button>
+        {user && user.id !== me?.id && <RemoveMember user={user} onDone={onClose} />}
       </div>
+    </div>
+  )
+}
+
+/**
+ * "Remove from team" (Edit modal). The server deletes the account outright when the person has no
+ * history; otherwise it deactivates them (sign-in banned, PIN / stores removed, open tasks
+ * unassigned) and keeps their name on past tasks, deliveries and the audit log.
+ */
+function RemoveMember({ user, onDone }: { user: Profile; onDone: () => void }) {
+  const admin = useAdminUsers()
+  const toast = useToast()
+  const [confirming, setConfirming] = useState(false)
+
+  const remove = () =>
+    admin.mutate(
+      { action: 'remove_user', user_id: user.id },
+      {
+        onSuccess: (r) => {
+          const n = r.unassigned_tasks ?? 0
+          toast(
+            r.mode === 'deleted'
+              ? `${user.full_name} deleted permanently`
+              : `${user.full_name} removed · history kept${n ? ` · ${n} open task${n === 1 ? '' : 's'} unassigned` : ''}`,
+          )
+          onDone()
+        },
+        onError: (e) => toast(e.message, 'error'),
+      },
+    )
+
+  return (
+    <div className="mt-4 border-t border-ink/5 pt-3">
+      {confirming ? (
+        <div className="rounded-xl bg-danger-soft p-3">
+          <div className="mb-1 text-[12.5px] font-bold text-danger">Remove {user.full_name}?</div>
+          <ul className="mb-3 ml-4 list-disc text-[11.5px] leading-relaxed text-ink/80">
+            <li>They can’t sign in any more — password and PIN both stop working at once.</li>
+            <li>Their store access is removed and their open tasks become unassigned.</li>
+            <li>
+              If they never did anything in the app, the account is deleted permanently. Otherwise their
+              name stays on past tasks and deliveries, and you can restore them later.
+            </li>
+          </ul>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setConfirming(false)}
+              className="flex-1 rounded-lg border border-ink/15 bg-white p-2 text-xs font-semibold text-slate"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={remove}
+              disabled={admin.isPending}
+              className="flex-1 rounded-lg bg-danger p-2 text-xs font-semibold text-white disabled:opacity-50"
+            >
+              {admin.isPending ? 'Removing…' : 'Remove'}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          onClick={() => setConfirming(true)}
+          className="flex items-center gap-1.5 text-xs font-semibold text-danger"
+        >
+          <Trash size={13} /> Remove from team
+        </button>
+      )}
+    </div>
+  )
+}
+
+function RemovedMembers({ people, roleName }: { people: Profile[]; roleName: (p: Profile) => string }) {
+  const admin = useAdminUsers()
+  const toast = useToast()
+  const [open, setOpen] = useState(false)
+  if (!people.length) return null
+  return (
+    <div className="mt-4">
+      <button onClick={() => setOpen((o) => !o)} className="mb-2 text-xs font-semibold text-slate">
+        {open ? '▾' : '▸'} Removed members ({people.length})
+      </button>
+      {open && (
+        <Card className="overflow-hidden">
+          {people.map((p) => (
+            <div key={p.id} className="flex items-center gap-3.5 border-b border-ink/5 px-4 py-3 opacity-80">
+              <Avatar name={p.full_name} color="#C3C9D2" size={34} />
+              <div className="min-w-0 flex-1">
+                <div className="text-[13px] font-semibold">{p.full_name}</div>
+                <div className="text-[11px] text-muted">
+                  {roleName(p)} · removed {p.deactivated_at ? timeAgo(p.deactivated_at) : ''}
+                </div>
+              </div>
+              <button
+                onClick={() =>
+                  admin.mutate(
+                    { action: 'restore_user', user_id: p.id },
+                    {
+                      onSuccess: () =>
+                        toast(`${p.full_name} restored — set their stores (Edit) and a PIN (Set PIN)`),
+                      onError: (e) => toast(e.message, 'error'),
+                    },
+                  )
+                }
+                disabled={admin.isPending}
+                className="rounded-lg border border-ink/15 px-3 py-1.5 text-xs font-semibold text-slate disabled:opacity-50"
+              >
+                Restore
+              </button>
+            </div>
+          ))}
+        </Card>
+      )}
     </div>
   )
 }
@@ -596,12 +710,14 @@ function UsersPanel() {
   const { data: kioskCodes } = useKioskCodes(isOwner)
   const codeOf = (userId: string) => (kioskCodes ?? []).find((k) => k.user_id === userId)?.code ?? null
   const [pinFor, setPinFor] = useState<Profile | null>(null)
+  const active = (profiles ?? []).filter((p) => !p.deactivated_at)
+  const removed = (profiles ?? []).filter((p) => !!p.deactivated_at)
 
   return (
     <div>
       <div className="mb-3.5 flex items-center justify-between">
         <div className="text-[12.5px] text-muted">
-          {(profiles ?? []).length} team members · tap “Change” next to a PIN to set or reset it
+          {active.length} team members · tap “Change” next to a PIN to set or reset it
         </div>
         <button
           onClick={() => setModal('new')}
@@ -611,7 +727,7 @@ function UsersPanel() {
         </button>
       </div>
       <Card className="overflow-hidden">
-        {(profiles ?? []).map((p) => {
+        {active.map((p) => {
           const myStores = (usr ?? [])
             .filter((r) => r.user_id === p.id)
             .map((r) => stores.find((s) => s.id === r.store_id)?.name)
@@ -646,6 +762,7 @@ function UsersPanel() {
           )
         })}
       </Card>
+      {isOwner && <RemovedMembers people={removed} roleName={roleName} />}
       {modal && <UserModal user={modal === 'new' ? null : modal} onClose={() => setModal(null)} />}
       {pinFor && <PinModal user={pinFor} code={codeOf(pinFor.id)} onClose={() => setPinFor(null)} />}
     </div>

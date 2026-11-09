@@ -376,7 +376,7 @@ export function useStorePeople(
         (p) =>
           atStore.has(p.id) ||
           keepIds.has(p.id) ||
-          (includeSupervisors && (p.role === 'owner' || p.role === 'manager')),
+          (includeSupervisors && !p.deactivated_at && (p.role === 'owner' || p.role === 'manager')),
       )
       .sort((a, b) => a.full_name.localeCompare(b.full_name))
   }, [profiles, roles, storeId, keepKey, includeSupervisors])
@@ -409,7 +409,7 @@ export function ReopenModal({
     id === task.submitted_by ? ' · handed it in' : id === task.assigned_to ? ' · currently assigned' : ''
 
   return (
-    <div onClick={onClose} className="fixed inset-0 z-[80] flex items-center justify-center bg-navy/50 p-3 sm:p-6">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-navy/50 p-3 sm:p-6">
       <div
         onClick={(e) => e.stopPropagation()}
         className="max-h-[calc(100dvh-24px)] w-[420px] max-w-full animate-fade overflow-y-auto rounded-[20px] bg-white p-6 shadow-[0_30px_80px_rgba(0,0,0,.3)]"
@@ -484,7 +484,6 @@ export function FeedbackModal({
   const [text, setText] = useState('')
   return (
     <div
-      onClick={onClose}
       className="fixed inset-0 z-[80] flex items-center justify-center bg-navy/50 p-6"
     >
       <div

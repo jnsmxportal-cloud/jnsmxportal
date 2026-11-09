@@ -13,12 +13,12 @@ function ComposeModal({ onClose, onSent }: { onClose: () => void; onSent: (threa
   const { data: profiles } = useProfiles()
   const send = useSendMessage()
   const toast = useToast()
-  const targets = (profiles ?? []).filter((p) => p.id !== session!.user.id)
+  const targets = (profiles ?? []).filter((p) => p.id !== session!.user.id && !p.deactivated_at)
   const [to, setTo] = useState('')
   const [body, setBody] = useState('')
 
   return (
-    <div onClick={onClose} className="fixed inset-0 z-[80] flex items-center justify-center bg-navy/50 p-6">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-navy/50 p-6">
       <div
         onClick={(e) => e.stopPropagation()}
         className="w-[440px] max-w-full animate-fade rounded-[20px] bg-white p-6 shadow-[0_30px_80px_rgba(0,0,0,.3)]"

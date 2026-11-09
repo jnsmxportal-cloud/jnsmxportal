@@ -261,7 +261,7 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div onClick={onClose} className="fixed inset-0 z-[80] flex items-center justify-center bg-navy/50 p-3 sm:p-6">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-navy/50 p-3 sm:p-6">
       <div
         onClick={(e) => e.stopPropagation()}
         className="flex max-h-[88dvh] w-[600px] max-w-full animate-fade flex-col overflow-hidden rounded-[20px] bg-white shadow-[0_30px_80px_rgba(0,0,0,.3)]"
@@ -414,7 +414,7 @@ export default function CreateTaskModal({ onClose }: { onClose: () => void }) {
             >
               <option value="">Any on-shift</option>
               {(profiles ?? [])
-                .filter((p) => p.role === 'staff' || p.role === 'team_leader')
+                .filter((p) => !p.deactivated_at && (p.role === 'staff' || p.role === 'team_leader'))
                 .map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.full_name}

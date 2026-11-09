@@ -45,7 +45,11 @@ export async function audit(
 }
 
 export async function reviewerProfiles(roles: AppRole[]): Promise<{ id: string; role: AppRole }[]> {
-  const { data, error } = await supabase.from('profiles').select('id, role').in('role', roles)
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, role')
+    .in('role', roles)
+    .is('deactivated_at', null) // removed members get nothing
   if (error) {
     console.warn('reviewers: lookup failed —', error.message)
     return []
@@ -68,7 +72,7 @@ export async function permissionHolders(
   storeId: string,
 ): Promise<{ id: string; role: AppRole }[]> {
   const [profilesRes, rolesRes, membersRes] = await Promise.all([
-    supabase.from('profiles').select('id, role, role_id'),
+    supabase.from('profiles').select('id, role, role_id').is('deactivated_at', null),
     supabase.from('roles').select('*'),
     supabase.from('user_store_roles').select('user_id').eq('store_id', storeId),
   ])

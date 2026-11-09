@@ -41,6 +41,8 @@ export interface Profile {
   role_id: string | null
   avatar_color: string
   is_online: boolean
+  /** set when the owner removed this member but their history had to be kept (sign-in banned) */
+  deactivated_at?: string | null
 }
 
 export interface Store {

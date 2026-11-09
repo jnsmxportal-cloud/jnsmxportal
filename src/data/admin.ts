@@ -324,13 +324,27 @@ export function useAdminUsers() {
   return useMutation({
     mutationFn: async (body: Record<string, unknown>) => {
       const { data, error } = await supabase.functions.invoke('admin-users', { body })
-      if (error) throw error
+      if (error) {
+        // non-2xx: show the function's own message ("This is the only Owner …"), not "non-2xx"
+        const ctx = (error as { context?: Response }).context
+        let msg: string | undefined
+        if (ctx && typeof ctx.json === 'function') {
+          try {
+            msg = ((await ctx.json()) as { error?: string }).error
+          } catch {
+            /* keep the generic error */
+          }
+        }
+        throw msg ? new Error(msg) : error
+      }
       if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error)
-      return data
+      return data as { ok: true; mode?: 'deleted' | 'deactivated'; unassigned_tasks?: number; user_id?: string }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['profiles'] })
       qc.invalidateQueries({ queryKey: ['user-store-roles'] })
+      qc.invalidateQueries({ queryKey: ['kiosk-codes'] })
+      qc.invalidateQueries({ queryKey: ['tasks'] })
     },
   })
 }

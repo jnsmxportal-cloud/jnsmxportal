@@ -145,5 +145,117 @@ Deno.serve(async (req: Request) => {
     return json({ ok: true });
   }
 
+  // ---- remove a member: delete outright when they have no history, otherwise deactivate ----
+  if (action === "remove_user") {
+    const { user_id } = body as { user_id: string };
+    if (!user_id) return json({ error: "user_id is required" }, 400);
+    if (user_id === callerProfile.id) return json({ error: "You can't remove your own account" }, 400);
+    const { data: target } = await service
+      .from("profiles")
+      .select("id, org_id, full_name, role, deactivated_at")
+      .eq("id", user_id)
+      .maybeSingle();
+    if (!target || target.org_id !== callerProfile.org_id) {
+      return json({ error: "User not found in your organisation" }, 404);
+    }
+    if (target.role === "owner") {
+      const { count } = await service
+        .from("profiles")
+        .select("id", { count: "exact", head: true })
+        .eq("org_id", callerProfile.org_id)
+        .eq("role", "owner")
+        .is("deactivated_at", null)
+        .neq("id", user_id);
+      if (!count) return json({ error: "This is the only Owner — make someone else Owner first" }, 400);
+    }
+    const { data: authUser } = await service.auth.admin.getUserById(user_id);
+    const email = authUser?.user?.email ?? null;
+
+    // access goes first, whatever happens next
+    const { count: unassigned } = await service
+      .from("task_instances")
+      .update({ assigned_to: null }, { count: "exact" })
+      .eq("assigned_to", user_id)
+      .in("status", ["scheduled", "assigned", "in_progress", "rejected"]);
+    await service.from("kiosk_codes").delete().eq("user_id", user_id);
+    await service.from("user_store_roles").delete().eq("user_id", user_id);
+    await service.from("push_subscriptions").delete().eq("user_id", user_id);
+    await service.from("shifts").delete().eq("user_id", user_id).gte("starts_at", new Date().toISOString());
+
+    // anything that still points at them is history worth keeping
+    const refs: [string, string][] = [
+      ["task_instances", "assigned_to"], ["task_instances", "submitted_by"], ["task_instances", "reviewed_by"],
+      ["checklist_items", "checked_by"], ["evidence", "uploader"], ["approvals", "reviewer"],
+      ["deliveries", "submitted_by"], ["deliveries", "reviewed_by"], ["deliveries", "approved_by"],
+      ["invoices", "uploaded_by"], ["escalations", "resolved_by"], ["messages", "from_user"],
+      ["messages", "to_user"], ["task_templates", "created_by"], ["shifts", "created_by"],
+      ["audit_log", "actor"],
+    ];
+    let history = 0;
+    for (const [table, col] of refs) {
+      const { count, error } = await service
+        .from(table)
+        .select("*", { count: "exact", head: true })
+        .eq(col, user_id);
+      if (error) return json({ error: `${table}: ${error.message}` }, 400);
+      history += count ?? 0;
+    }
+
+    const audit = (act: string, detail: Record<string, unknown>) =>
+      service.from("audit_log").insert({
+        org_id: callerProfile.org_id,
+        actor: callerProfile.id,
+        action: act,
+        entity: "profile",
+        entity_id: user_id,
+        detail: { name: target.full_name, email, unassigned_tasks: unassigned ?? 0, ...detail },
+      });
+
+    if (history === 0) {
+      // auth.users → profiles cascade takes notifications, shifts, roster rows with it
+      const { error } = await service.auth.admin.deleteUser(user_id);
+      if (error) return json({ error: error.message }, 400);
+      await audit("user.deleted", {});
+      return json({ ok: true, mode: "deleted" });
+    }
+
+    const { error: banErr } = await service.auth.admin.updateUserById(user_id, { ban_duration: "876000h" });
+    if (banErr) return json({ error: banErr.message }, 400);
+    const { error: pErr } = await service
+      .from("profiles")
+      .update({ deactivated_at: new Date().toISOString(), is_online: false })
+      .eq("id", user_id);
+    if (pErr) return json({ error: pErr.message }, 400);
+    await audit("user.deactivated", { history_rows: history });
+    return json({ ok: true, mode: "deactivated", unassigned_tasks: unassigned ?? 0 });
+  }
+
+  // ---- bring a removed member back (stores and PIN are set again from Edit / Change) ----
+  if (action === "restore_user") {
+    const { user_id } = body as { user_id: string };
+    if (!user_id) return json({ error: "user_id is required" }, 400);
+    const { data: target } = await service
+      .from("profiles")
+      .select("id, org_id")
+      .eq("id", user_id)
+      .maybeSingle();
+    if (!target || target.org_id !== callerProfile.org_id) {
+      return json({ error: "User not found in your organisation" }, 404);
+    }
+    const { error: banErr } = await service.auth.admin.updateUserById(user_id, { ban_duration: "none" });
+    if (banErr) return json({ error: banErr.message }, 400);
+    const { error } = await service.from("profiles").update({ deactivated_at: null }).eq("id", user_id);
+    if (error) return json({ error: error.message }, 400);
+    await service.from("audit_log").insert({
+      org_id: callerProfile.org_id,
+      actor: callerProfile.id,
+      action: "user.restored",
+      entity: "profile",
+      entity_id: user_id,
+      detail: {},
+    });
+    return json({ ok: true });
+  }
+
   return json({ error: `Unknown action: ${action}` }, 400);
 });

@@ -89,6 +89,24 @@ export default function App() {
         </button>
       </div>
     )
+  // removed by the owner: sign-in is banned server-side, but a session already open on a
+  // device stays valid until its token expires — don't let it into the app meanwhile
+  if (session && profile?.deactivated_at)
+    return (
+      <div className="flex min-h-full flex-col items-center justify-center gap-4 bg-navy p-6 text-center">
+        <div className="text-[17px] font-bold text-white">This account has been removed</div>
+        <div className="max-w-[300px] text-[12px] leading-relaxed text-muted">
+          You no longer have access to this store’s app. Talk to your manager if you think this is a
+          mistake.
+        </div>
+        <button
+          onClick={() => signOut()}
+          className="rounded-xl bg-white/10 px-6 py-2.5 text-sm font-bold text-white"
+        >
+          Sign out
+        </button>
+      </div>
+    )
   if (!session || !profile) return <Login />
 
   const home =
