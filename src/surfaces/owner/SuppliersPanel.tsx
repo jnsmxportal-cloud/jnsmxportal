@@ -161,7 +161,7 @@ function SupplierModal({ supplier, onClose }: { supplier: Supplier | null; onClo
       },
     )
   return (
-    <div onClick={onClose} className={modalShell}>
+    <div className={modalShell}>
       <div onClick={(e) => e.stopPropagation()} className={modalBox}>
         <div className="mb-1 flex items-center justify-between">
           <h3 className="text-[17px] font-bold">{supplier ? 'Rename supplier' : 'New supplier'}</h3>
@@ -218,7 +218,7 @@ function DeleteSupplierModal({
   const del = useDeleteSupplier()
   const toast = useToast()
   return (
-    <div onClick={onClose} className={modalShell}>
+    <div className={modalShell}>
       <div onClick={(e) => e.stopPropagation()} className={modalBox}>
         <h3 className="mb-1 text-[17px] font-bold">Delete “{supplier.name}”?</h3>
         <div className="mb-4 text-[12.5px] leading-relaxed text-muted">

@@ -115,7 +115,7 @@ export default function RolesPanel() {
         />
       )}
       {confirm && (
-        <div onClick={() => setConfirm(null)} className={shell}>
+        <div className={shell}>
           <div
             onClick={(e) => e.stopPropagation()}
             className="w-[440px] max-w-full animate-fade rounded-[20px] bg-white p-6 shadow-[0_30px_80px_rgba(0,0,0,.3)]"
@@ -193,7 +193,7 @@ function RoleModal({ role, onClose, onSaved }: { role: Role | null; onClose: () 
   const baseInfo = BASE_ROLES.find((b) => b.id === base)
 
   return (
-    <div onClick={onClose} className={shell}>
+    <div className={shell}>
       <div
         onClick={(e) => e.stopPropagation()}
         className="flex max-h-[92dvh] w-[640px] max-w-full animate-fade flex-col overflow-hidden rounded-[20px] bg-white shadow-[0_30px_80px_rgba(0,0,0,.3)]"

@@ -234,7 +234,7 @@ function CategoryModal({ category, onClose }: { category: Category | null; onClo
     )
 
   return (
-    <div onClick={onClose} className={modalShell}>
+    <div className={modalShell}>
       <div onClick={(e) => e.stopPropagation()} className={modalBox}>
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-[17px] font-bold">
@@ -385,7 +385,7 @@ function DeleteModal({
     )
 
   return (
-    <div onClick={onClose} className={modalShell}>
+    <div className={modalShell}>
       <div onClick={(e) => e.stopPropagation()} className={modalBox}>
         <div className="mb-3 flex items-start gap-3">
           <div className="flex h-10 w-10 flex-none items-center justify-center rounded-[11px] bg-danger-soft">

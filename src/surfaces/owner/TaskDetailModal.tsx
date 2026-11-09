@@ -63,7 +63,7 @@ export function TaskDetailModal({ task, onClose }: { task: TaskInstance; onClose
   if (task.completed_at && !task.reviewed_at) meta.push({ k: 'Completed', v: fmt(task.completed_at) })
 
   return (
-    <div onClick={onClose} className={shell}>
+    <div className={shell}>
       <div onClick={(e) => e.stopPropagation()} className={card}>
         <div className="flex items-start gap-3 border-b border-line px-5 py-4 sm:px-6">
           <div
@@ -290,7 +290,7 @@ export function TaskListModal({
   const { userName, storeName } = useNames()
   const kind = useKindMeta()
   return (
-    <div onClick={onClose} className={shell}>
+    <div className={shell}>
       <div onClick={(e) => e.stopPropagation()} className={card}>
         <div className="flex items-center justify-between border-b border-line px-5 py-4 sm:px-6">
           <div>

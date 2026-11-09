@@ -113,7 +113,7 @@ export function VerifyModal({ delivery, onClose }: { delivery: Delivery; onClose
     'w-full rounded-xl border-[1.5px] border-ink/15 bg-white p-2.5 text-sm outline-none focus:border-brand'
 
   return (
-    <div onClick={onClose} className={shell}>
+    <div className={shell}>
       <div onClick={(e) => e.stopPropagation()} className={panel}>
         <div className="mb-1 flex items-center justify-between">
           <h3 className="text-[17px] font-bold">Verify delivery</h3>
@@ -229,7 +229,7 @@ export function DeliveryDetailModal({ delivery, onClose }: { delivery: Delivery;
     )
 
   return (
-    <div onClick={onClose} className={shell}>
+    <div className={shell}>
       <div onClick={(e) => e.stopPropagation()} className={panel}>
         <div className="mb-1 flex items-start justify-between gap-3">
           <div className="min-w-0">

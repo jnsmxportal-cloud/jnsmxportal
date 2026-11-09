@@ -521,7 +521,7 @@ function BulkTaskModal({
   }
 
   return (
-    <div onClick={onClose} className="fixed inset-0 z-[80] flex items-center justify-center bg-navy/50 p-3 sm:p-6">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-navy/50 p-3 sm:p-6">
       <div
         onClick={(e) => e.stopPropagation()}
         className="flex max-h-[92dvh] w-[480px] max-w-full animate-fade flex-col overflow-hidden rounded-[20px] bg-white shadow-[0_30px_80px_rgba(0,0,0,.3)]"
@@ -660,7 +660,7 @@ function TaskEditModal({ task, onClose }: { task: TaskInstance; onClose: () => v
   }
 
   return (
-    <div onClick={onClose} className="fixed inset-0 z-[80] flex items-center justify-center bg-navy/50 p-3 sm:p-6">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-navy/50 p-3 sm:p-6">
       <div
         onClick={(e) => e.stopPropagation()}
         className="flex max-h-[92dvh] w-[520px] max-w-full animate-fade flex-col overflow-hidden rounded-[20px] bg-white shadow-[0_30px_80px_rgba(0,0,0,.3)]"
@@ -745,7 +745,7 @@ function DeleteTaskModal({ task, onClose }: { task: TaskInstance; onClose: () =>
   const { storeName } = useNames()
   const open = isOpenStatus(task.status)
   return (
-    <div onClick={onClose} className="fixed inset-0 z-[80] flex items-center justify-center bg-navy/50 p-3 sm:p-6">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-navy/50 p-3 sm:p-6">
       <div
         onClick={(e) => e.stopPropagation()}
         className="w-[440px] max-w-full animate-fade rounded-[20px] bg-white p-6 shadow-[0_30px_80px_rgba(0,0,0,.3)]"

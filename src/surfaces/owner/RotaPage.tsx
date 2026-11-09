@@ -83,7 +83,6 @@ function ShiftModal({
 
   return (
     <div
-      onClick={onClose}
       className="fixed inset-0 z-[80] flex items-center justify-center bg-navy/50 p-6"
     >
       <div
