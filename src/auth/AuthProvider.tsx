@@ -214,7 +214,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (e) {
       console.warn('sign-out cleanup failed —', e)
     }
-    await supabase.auth.signOut()
+    // 'local': sign out THIS device only. The default ('global') revokes every session of the
+    // account, so one person signing out of a shared login broke everyone else's session.
+    await supabase.auth.signOut({ scope: 'local' })
   }
 
   return (

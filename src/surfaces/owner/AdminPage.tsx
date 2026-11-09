@@ -707,7 +707,7 @@ function UsersPanel() {
   const { stores, profile: me } = useAuth()
   const [modal, setModal] = useState<Profile | null | 'new'>(null)
   const isOwner = me?.role === 'owner'
-  const { data: kioskCodes } = useKioskCodes(isOwner)
+  const { data: kioskCodes, error: kioskError, refetch: refetchCodes } = useKioskCodes(isOwner)
   const codeOf = (userId: string) => (kioskCodes ?? []).find((k) => k.user_id === userId)?.code ?? null
   const [pinFor, setPinFor] = useState<Profile | null>(null)
   const active = (profiles ?? []).filter((p) => !p.deactivated_at)
@@ -726,6 +726,14 @@ function UsersPanel() {
           <Plus size={13} weight="bold" /> Add member
         </button>
       </div>
+      {kioskError && (
+        <div className="mb-3 flex items-center gap-3 rounded-xl bg-danger-soft px-3.5 py-2.5 text-xs text-danger">
+          <span className="flex-1">Couldn’t load sign-in PINs — {kioskError.message}</span>
+          <button onClick={() => refetchCodes()} className="font-semibold underline">
+            Retry
+          </button>
+        </div>
+      )}
       <Card className="overflow-hidden">
         {active.map((p) => {
           const myStores = (usr ?? [])
@@ -749,7 +757,7 @@ function UsersPanel() {
                   {p.role === 'owner' ? ' · all stores' : myStores.length ? ` · ${myStores.join(', ')}` : ' · no store assigned'}
                 </div>
               </div>
-              {isOwner && (
+              {isOwner && !kioskError && (
                 <KioskCodeChip code={codeOf(p.id)} onManage={() => setPinFor(p)} />
               )}
               <button

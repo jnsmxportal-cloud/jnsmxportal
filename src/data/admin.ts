@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase, ORG_ID } from '../lib/supabase'
 import { useAuth } from '../auth/AuthProvider'
 import type { AppRole, EvidenceReqs, Store, StoreUnit, TaskCategory, TaskPriority } from '../lib/types'
+import { invokeEdge } from '../lib/edge'
 
 export interface ChecklistDef {
   label: string
@@ -322,24 +323,12 @@ export function useUserStoreRoles() {
 export function useAdminUsers() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async (body: Record<string, unknown>) => {
-      const { data, error } = await supabase.functions.invoke('admin-users', { body })
-      if (error) {
-        // non-2xx: show the function's own message ("This is the only Owner …"), not "non-2xx"
-        const ctx = (error as { context?: Response }).context
-        let msg: string | undefined
-        if (ctx && typeof ctx.json === 'function') {
-          try {
-            msg = ((await ctx.json()) as { error?: string }).error
-          } catch {
-            /* keep the generic error */
-          }
-        }
-        throw msg ? new Error(msg) : error
-      }
-      if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error)
-      return data as { ok: true; mode?: 'deleted' | 'deactivated'; unassigned_tasks?: number; user_id?: string }
-    },
+    // the function's own message ("This is the only Owner …") and sign-in-again handling on 401
+    mutationFn: (body: Record<string, unknown>) =>
+      invokeEdge<{ ok: true; mode?: 'deleted' | 'deactivated'; unassigned_tasks?: number; user_id?: string }>(
+        'admin-users',
+        body,
+      ),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['profiles'] })
       qc.invalidateQueries({ queryKey: ['user-store-roles'] })

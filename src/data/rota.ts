@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase, ORG_ID } from '../lib/supabase'
 import type { Shift } from '../lib/types'
+import { invokeEdge } from '../lib/edge'
 
 /** Monday 00:00 local time of the week containing `d`. */
 export function weekStart(d: Date): Date {
@@ -162,35 +163,12 @@ export function useKioskCodes(enabled: boolean) {
   return useQuery({
     queryKey: ['kiosk-codes'],
     enabled,
-    queryFn: async () => {
-      const { data, error } = await supabase.functions.invoke('kiosk-admin', {
-        body: { action: 'list' },
-      })
-      if (error) throw error
-      if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error)
-      return (data as { codes: KioskCodeRow[] }).codes
-    },
+    queryFn: async () => (await kioskCall<{ codes: KioskCodeRow[] }>({ action: 'list' })).codes,
   })
 }
 
-/** Calls kiosk-admin and surfaces the function's own error message on a non-2xx reply. */
-async function kioskCall<T>(body: Record<string, unknown>): Promise<T> {
-  const { data, error } = await supabase.functions.invoke('kiosk-admin', { body })
-  if (error) {
-    const ctx = (error as { context?: Response }).context
-    if (ctx && typeof ctx.json === 'function') {
-      try {
-        const msg = ((await ctx.json()) as { error?: string }).error
-        if (msg) throw new Error(msg)
-      } catch (e) {
-        if (e instanceof Error && e.message) throw e
-      }
-    }
-    throw error
-  }
-  if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error)
-  return data as T
-}
+/** kiosk-admin call: the function's own error message, and sign-in-again handling on 401. */
+const kioskCall = <T,>(body: Record<string, unknown>) => invokeEdge<T>('kiosk-admin', body)
 
 /** Owner: set a PIN (random when `code` is omitted) or remove it. */
 export function useKioskAdmin() {
