@@ -7,14 +7,15 @@ import { timeAgo } from '../../lib/format'
 import { useToast } from '../../components/Toast'
 import { useOwnerCtx } from './OwnerLayout'
 import { useNames } from './shared'
-import { DeliveryDetailModal, VerifyModal, useOpenInvoicePdf } from './DeliveryDetailModal'
+import { DeliveryDetailModal, VerifyModal, deliveryPdfTarget } from './DeliveryDetailModal'
+import { InvoicePdfButtons, usePdfViewer } from '../../components/PdfViewer'
+import { invoiceFileName } from '../../lib/invoiceFile'
 import { deliveryIssueText } from '../../lib/deliveryIssues'
 import type { Delivery } from '../../lib/types'
 
 function InvoiceFolder({ storeId }: { storeId: string | 'all' }) {
   const { data: invoices } = useInvoices(storeId)
   const { storeName, userName } = useNames()
-  const open = useOpenInvoicePdf()
   return (
     <Card className="mt-5 max-w-[980px] overflow-hidden">
       <div className="flex items-center gap-2 border-b border-ink/5 px-5 py-[15px]">
@@ -33,13 +34,23 @@ function InvoiceFolder({ storeId }: { storeId: string | 'all' }) {
           <span className="hidden text-slate md:block">{storeName(inv.store_id)}</span>
           <span className="hidden font-mono text-slate md:block">{inv.invoice_no ? `#${inv.invoice_no}` : '—'}</span>
           <span className="col-span-2 truncate font-mono text-[11px] text-muted md:col-span-1">{inv.pdf_path}</span>
-          <button
-            onClick={() => open(inv.pdf_path)}
-            title={`Uploaded by ${userName(inv.uploaded_by)} · ${timeAgo(inv.uploaded_at)}`}
-            className="flex items-center gap-1.5 rounded-lg border border-ink/15 px-3 py-1.5 text-xs font-semibold text-slate"
-          >
-            <FilePdf size={14} /> Open PDF
-          </button>
+          <span title={`Uploaded by ${userName(inv.uploaded_by)} · ${timeAgo(inv.uploaded_at)}`}>
+            {inv.pdf_path ? (
+              <InvoicePdfButtons
+                target={{
+                  path: inv.pdf_path,
+                  title: `${inv.supplier} · Invoice${inv.invoice_no ? ` #${inv.invoice_no}` : ''}`,
+                  fileName: invoiceFileName({
+                    supplier: inv.supplier,
+                    invoiceNo: inv.invoice_no,
+                    date: inv.invoice_date ?? inv.uploaded_at,
+                  }),
+                }}
+              />
+            ) : (
+              <span className="text-xs text-muted">No file</span>
+            )}
+          </span>
         </div>
       ))}
       {(invoices ?? []).length === 0 && (
@@ -59,7 +70,7 @@ export default function DeliveriesPage() {
   const review = useReviewDelivery()
   const toast = useToast()
   const canAct = can('deliveries.verify')
-  const openPdf = useOpenInvoicePdf()
+  const pdf = usePdfViewer()
   const [verifying, setVerifying] = useState<Delivery | null>(null)
   // by id, so the modal shows the live row (realtime refetches) rather than a stale snapshot
   const [openId, setOpenId] = useState<string | null>(null)
@@ -109,10 +120,11 @@ export default function DeliveriesPage() {
                 <button
                   onClick={(e) => {
                     e.stopPropagation()
-                    openPdf(d.invoice_pdf_path)
+                    const t = deliveryPdfTarget(d)
+                    if (t) pdf.open(t)
                   }}
-                  title={`Open invoice PDF${d.invoice_pages ? ` (${d.invoice_pages} page${d.invoice_pages === 1 ? '' : 's'})` : ''}`}
-                  aria-label="Open invoice PDF"
+                  title={`View invoice PDF${d.invoice_pages ? ` (${d.invoice_pages} page${d.invoice_pages === 1 ? '' : 's'})` : ''}`}
+                  aria-label="View invoice PDF"
                   className="rounded-md p-0.5 text-[#DB2777] hover:bg-[#DB2777]/10"
                 >
                   <FilePdf size={16} weight="fill" />
@@ -228,6 +240,7 @@ export default function DeliveriesPage() {
     </div>
     </Card>
     <InvoiceFolder storeId={storeId} />
+    {pdf.viewer}
     {verifying && <VerifyModal delivery={verifying} onClose={() => setVerifying(null)} />}
     {openDelivery && <DeliveryDetailModal delivery={openDelivery} onClose={() => setOpenId(null)} />}
     </div>

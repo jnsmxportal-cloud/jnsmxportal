@@ -4,8 +4,9 @@ import { Check, CircleNotch, ClipboardText, FilePdf, X } from '@phosphor-icons/r
 import { StatusChip, deliveryStatusStyle } from '../../components/ui'
 import { useAuth } from '../../auth/AuthProvider'
 import { useReviewDelivery, useVerifyDelivery } from '../../data/hooks'
-import { supabase } from '../../lib/supabase'
 import { timeAgo } from '../../lib/format'
+import { invoiceFileName } from '../../lib/invoiceFile'
+import { InvoicePdfButtons, type PdfTarget } from '../../components/PdfViewer'
 import { useToast } from '../../components/Toast'
 import { EvidencePhoto, useNames } from './shared'
 import { useDeliveryEvidence } from '../../data/ownerExtras'
@@ -17,35 +18,28 @@ const panel =
   'max-h-[calc(100dvh-24px)] w-[480px] max-w-full overflow-y-auto animate-fade rounded-[20px] bg-white p-6 shadow-[0_30px_80px_rgba(0,0,0,.3)] sm:max-h-[calc(100dvh-48px)]'
 const label = 'mb-1.5 block text-xs font-semibold text-slate'
 
-/** Open a PDF from the `invoices` bucket via a short-lived signed URL. */
-export function useOpenInvoicePdf() {
-  const toast = useToast()
-  return async (path: string | null) => {
-    if (!path) return
-    const { data, error } = await supabase.storage.from('invoices').createSignedUrl(path, 300)
-    if (error || !data?.signedUrl) {
-      toast('Could not open the PDF', 'error')
-      return
-    }
-    window.open(data.signedUrl, '_blank')
+/** What the PDF viewer / download needs for a delivery's scanned invoice. */
+export function deliveryPdfTarget(d: Delivery): PdfTarget | null {
+  if (!d.invoice_pdf_path) return null
+  return {
+    path: d.invoice_pdf_path,
+    title: `${d.supplier} · Invoice${d.invoice_no ? ` #${d.invoice_no}` : ''}`,
+    fileName: invoiceFileName({ supplier: d.supplier, invoiceNo: d.invoice_no, date: d.submitted_at }),
   }
 }
 
 function InvoiceScan({ delivery }: { delivery: Delivery }) {
-  const openPdf = useOpenInvoicePdf()
-  if (!delivery.invoice_pdf_path)
+  const target = deliveryPdfTarget(delivery)
+  if (!target)
     return (
       <div className="mb-3 rounded-[10px] border border-dashed border-ink/15 px-3 py-2.5 text-[11.5px] text-muted">
         No invoice scanned with this delivery
       </div>
     )
   return (
-    <button
-      onClick={() => openPdf(delivery.invoice_pdf_path)}
-      className="mb-3 flex w-full items-center gap-2.5 rounded-[10px] border border-ink/15 px-3 py-2.5 text-left"
-    >
-      <FilePdf size={20} weight="fill" color="#DB2777" />
-      <span className="flex-1 text-[12.5px] font-semibold">
+    <div className="mb-3 flex w-full items-center gap-2.5 rounded-[10px] border border-ink/15 px-3 py-2.5">
+      <FilePdf size={20} weight="fill" color="#DB2777" className="flex-none" />
+      <span className="min-w-0 flex-1 text-[12.5px] font-semibold">
         Invoice{delivery.invoice_no ? ` #${delivery.invoice_no}` : ''}
         {delivery.invoice_pages ? (
           <span className="font-normal text-muted">
@@ -53,8 +47,8 @@ function InvoiceScan({ delivery }: { delivery: Delivery }) {
           </span>
         ) : null}
       </span>
-      <span className="text-[11.5px] font-semibold text-brand">Open PDF</span>
-    </button>
+      <InvoicePdfButtons target={target} />
+    </div>
   )
 }
 

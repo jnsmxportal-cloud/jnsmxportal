@@ -10,6 +10,8 @@ import { useSupplierNames } from '../../data/suppliers'
 import { audit } from '../../data/ops'
 import { timeAgo } from '../../lib/format'
 import { useToast } from '../../components/Toast'
+import { InvoicePdfButtons } from '../../components/PdfViewer'
+import { invoiceFileName } from '../../lib/invoiceFile'
 import InvoicePages, { useInvoicePages } from '../../components/InvoicePages'
 import { useStaffStore } from './StaffShell'
 import { buildInvoicePdf, invoicePdfPath } from '../../lib/invoicePdf'
@@ -31,16 +33,6 @@ export default function InvoiceUpload() {
   const [busy, setBusy] = useState(false)
   const { data: recentInvoices } = useInvoices(store?.id)
   const ready = invoicePages.count > 0 && !invoicePages.processing
-
-  const openInvoice = async (path: string | null) => {
-    if (!path) return
-    const { data, error } = await supabase.storage.from('invoices').createSignedUrl(path, 300)
-    if (error || !data?.signedUrl) {
-      toast('Could not open the PDF', 'error')
-      return
-    }
-    window.open(data.signedUrl, '_blank')
-  }
 
   const submit = async () => {
     if (!ready || busy) return
@@ -141,9 +133,8 @@ export default function InvoiceUpload() {
               Recently filed — {store?.name}
             </div>
             {(recentInvoices ?? []).slice(0, 8).map((inv) => (
-              <button
+              <div
                 key={inv.id}
-                onClick={() => openInvoice(inv.pdf_path)}
                 className="flex w-full items-center gap-2.5 border-t border-ink/5 px-4 py-2.5 text-left first:border-t-0"
               >
                 <FilePdf size={18} color="#DB2777" weight="fill" className="flex-none" />
@@ -154,8 +145,21 @@ export default function InvoiceUpload() {
                   </span>
                   <span className="block text-[10.5px] text-muted">{timeAgo(inv.uploaded_at)}</span>
                 </span>
-                <span className="text-[11px] font-semibold text-brand">Open</span>
-              </button>
+                {inv.pdf_path && (
+                  <InvoicePdfButtons
+                    compact
+                    target={{
+                      path: inv.pdf_path,
+                      title: `${inv.supplier} · Invoice${inv.invoice_no ? ` #${inv.invoice_no}` : ''}`,
+                      fileName: invoiceFileName({
+                        supplier: inv.supplier,
+                        invoiceNo: inv.invoice_no,
+                        date: inv.invoice_date ?? inv.uploaded_at,
+                      }),
+                    }}
+                  />
+                )}
+              </div>
             ))}
           </div>
         )}
