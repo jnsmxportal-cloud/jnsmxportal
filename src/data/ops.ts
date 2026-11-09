@@ -285,6 +285,8 @@ export interface DeliveryArgs {
   remarks: string
   photoCount: number
   photos: Blob[]
+  /** Photos of the reported issue (damage, expiry…); evidence rows tagged metadata.kind = 'issue'. */
+  issuePhotos?: Blob[]
   geofenceVerdict: string
   /** Scanned invoice pages consolidated into one PDF (optional; older queued ops lack it). */
   invoicePdf?: Blob | null
@@ -322,7 +324,7 @@ export async function submitDeliveryCore(uid: string, args: DeliveryArgs, device
       discrepancy_units: args.discrepancy,
       issue_types: issueTypes,
       remarks: args.remarks || null,
-      photo_count: args.photos.length,
+      photo_count: args.photos.length + (args.issuePhotos?.length ?? 0),
       status: 'review',
       submitted_by: uid,
       submitted_at: ts,
@@ -347,17 +349,23 @@ export async function submitDeliveryCore(uid: string, args: DeliveryArgs, device
     })
     if (invError) console.warn('[delivery] invoice folder entry failed', invError)
   }
-  for (let i = 0; i < args.photos.length; i++) {
-    const path = `${ORG_ID}/deliveries/${deliveryId}/${Date.now()}-${i}.jpg`
+  const allPhotos = [
+    ...args.photos.map((blob) => ({ blob, issue: false })),
+    ...(args.issuePhotos ?? []).map((blob) => ({ blob, issue: true })),
+  ]
+  for (let i = 0; i < allPhotos.length; i++) {
+    const { blob, issue } = allPhotos[i]
+    const path = `${ORG_ID}/deliveries/${deliveryId}/${issue ? 'issue-' : ''}${Date.now()}-${i}.jpg`
     const { error: uploadError } = await supabase.storage
       .from('evidence')
-      .upload(path, args.photos[i], { contentType: 'image/jpeg' })
+      .upload(path, blob, { contentType: 'image/jpeg' })
     if (uploadError) throw uploadError
     const { error: evidenceError } = await supabase.from('evidence').insert({
       org_id: ORG_ID,
       delivery_id: deliveryId,
       type: 'photo',
       storage_path: path,
+      metadata: issue ? { kind: 'issue' } : null,
       uploader: uid,
       device_ts: ts,
     })
@@ -410,6 +418,7 @@ export async function submitDeliveryCore(uid: string, args: DeliveryArgs, device
     discrepancy: args.discrepancy,
     issue_types: issueTypes,
     photos: args.photos.length,
+    issue_photos: args.issuePhotos?.length ?? 0,
     invoice_pages: invoicePdfPath ? args.invoicePages ?? null : 0,
   })
   return { queued: false }

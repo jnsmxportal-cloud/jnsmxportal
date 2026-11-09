@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   Camera,
   Check,
+  Images,
   MapPin,
   Warning,
   X,
@@ -38,20 +39,21 @@ export default function DeliveryWizard() {
   const [hasDiscrepancy, setHasDiscrepancy] = useState<boolean | null>(null)
   // what kind of issue(s) — a delivery can be short AND damaged, so several can be picked
   const [issues, setIssues] = useState<DeliveryIssue[]>([])
-  const [qty, setQty] = useState('')
   const [remarks, setRemarks] = useState('')
   const [photos, setPhotos] = useState<{ blob: Blob; url: string }[]>([])
+  // photos of the issue itself (damaged / expired stock…) — camera or gallery
+  const [issuePhotos, setIssuePhotos] = useState<{ blob: Blob; url: string }[]>([])
   const fileRef = useRef<HTMLInputElement>(null)
+  const issueFileRef = useRef<HTMLInputElement>(null)
   const invoicePages = useInvoicePages()
   const pagesProcessing = invoicePages.processing
 
-  const qtyNum = parseInt(qty || '0', 10)
-  /** Units affected — only counts when staff answered "Yes" (a "No" ignores any stale number). */
-  const unitsShort = hasDiscrepancy && !Number.isNaN(qtyNum) ? qtyNum : 0
   const pickedIssues = hasDiscrepancy ? issues : []
   const hasIssue = pickedIssues.length > 0
-  const issueSummary = deliveryIssueText({ issue_types: pickedIssues, discrepancy_units: unitsShort })
-  // step 3: an explicit Yes/No; "Yes" needs at least one issue type and remarks (units optional)
+  // a "No" ignores any issue photos attached before the answer was switched
+  const pickedIssuePhotos = hasDiscrepancy ? issuePhotos : []
+  const issueSummary = deliveryIssueText({ issue_types: pickedIssues, discrepancy_units: 0 })
+  // step 3: an explicit Yes/No; "Yes" needs at least one issue type and remarks (photos optional)
   const discrepancyMissing =
     hasDiscrepancy === null
       ? 'Choose Yes or No for delivery issues'
@@ -84,6 +86,24 @@ export default function DeliveryWizard() {
     })
   }
 
+  const addIssuePhotos = async (files: File[]) => {
+    for (const f of files) {
+      try {
+        const blob = await compressImage(f)
+        setIssuePhotos((p) => [...p, { blob, url: URL.createObjectURL(blob) }])
+      } catch (e) {
+        toast(e instanceof Error ? e.message : 'Could not process the photo', 'error')
+      }
+    }
+  }
+
+  const removeIssuePhoto = (i: number) => {
+    setIssuePhotos((p) => {
+      URL.revokeObjectURL(p[i].url)
+      return p.filter((_, idx) => idx !== i)
+    })
+  }
+
   const next = () => {
     if (step === 2 && discrepancyMissing) return
     if (step < 3) {
@@ -111,11 +131,12 @@ export default function DeliveryWizard() {
         storeName: store.name,
         supplier,
         invoiceNo: invoice,
-        discrepancy: unitsShort,
+        discrepancy: 0,
         issueTypes: pickedIssues,
         remarks: remarks.trim(),
         photoCount: photos.length,
         photos: photos.map((p) => p.blob),
+        issuePhotos: pickedIssuePhotos.map((p) => p.blob),
         geofenceVerdict: geo?.verdict ?? 'unknown',
         invoicePdf,
         invoicePages: scanned.length,
@@ -170,6 +191,18 @@ export default function DeliveryWizard() {
         className="hidden"
         onChange={(e) => {
           addPhoto(e.target.files?.[0])
+          e.target.value = ''
+        }}
+      />
+      {/* no `capture`: the phone offers camera or gallery, and several photos can be picked at once */}
+      <input
+        ref={issueFileRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          addIssuePhotos(Array.from(e.target.files ?? []))
           e.target.value = ''
         }}
       />
@@ -343,15 +376,33 @@ export default function DeliveryWizard() {
                 </div>
                 <div>
                   <label className={label}>
-                    Units affected <span className="font-normal text-muted">(optional)</span>
+                    Photos of the issue <span className="font-normal text-muted">(optional)</span>
                   </label>
-                  <input
-                    value={qty}
-                    onChange={(e) => setQty(e.target.value.replace(/[^0-9]/g, ''))}
-                    inputMode="numeric"
-                    placeholder="e.g. 6"
-                    className={inputCls}
-                  />
+                  <div className="grid grid-cols-4 gap-2">
+                    {issuePhotos.map((ph, i) => (
+                      <div
+                        key={ph.url}
+                        className="relative aspect-square overflow-hidden rounded-[11px] border border-ink/5"
+                      >
+                        <img src={ph.url} alt="" className="h-full w-full object-cover" />
+                        <button
+                          onClick={() => removeIssuePhoto(i)}
+                          aria-label="Remove photo"
+                          className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-ink/70"
+                        >
+                          <X size={11} weight="bold" color="#fff" />
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => issueFileRef.current?.click()}
+                      className="flex aspect-square flex-col items-center justify-center gap-1 rounded-[11px] border-[1.5px] border-dashed border-ink/20 bg-white"
+                    >
+                      <Images size={22} color="#8B93A4" />
+                      <span className="text-[10px] font-semibold text-muted">Attach</span>
+                    </button>
+                  </div>
                 </div>
                 <div className="flex items-start gap-2 rounded-xl bg-warn-soft p-3 text-xs text-amber">
                   <Warning size={16} weight="fill" className="mt-px flex-none" />
@@ -399,6 +450,7 @@ export default function DeliveryWizard() {
                       : 'Not scanned',
                   ],
                   ['Goods photos', `${photos.length} captured`],
+                  ...(hasIssue ? [['Issue photos', `${pickedIssuePhotos.length} attached`]] : []),
                 ].map(([k, v]) => (
                   <div key={k} className="flex justify-between">
                     <span className="text-muted">{k}</span>

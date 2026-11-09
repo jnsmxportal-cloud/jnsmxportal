@@ -58,21 +58,37 @@ function InvoiceScan({ delivery }: { delivery: Delivery }) {
   )
 }
 
-function GoodsPhotos({ deliveryId }: { deliveryId: string }) {
+/** Goods photos, then — when staff attached any — the photos of the reported issue. */
+function DeliveryPhotos({ deliveryId }: { deliveryId: string }) {
   const { data: evidence } = useDeliveryEvidence(deliveryId)
-  const photos = (evidence ?? []).filter((e) => e.type === 'photo' && e.storage_path)
-  if (photos.length === 0)
-    return (
-      <div className="mb-3 rounded-[10px] border border-dashed border-ink/15 px-3 py-2.5 text-[11.5px] text-muted">
-        No photos attached to this delivery
-      </div>
-    )
+  const all = (evidence ?? []).filter((e) => e.type === 'photo' && e.storage_path)
+  const goods = all.filter((e) => e.metadata?.kind !== 'issue')
+  const issue = all.filter((e) => e.metadata?.kind === 'issue')
   return (
-    <div className="mb-3 flex flex-wrap gap-2">
-      {photos.map((e) => (
-        <EvidencePhoto key={e.id} ev={e} />
-      ))}
-    </div>
+    <>
+      <label className={label}>Goods photos from the store</label>
+      {goods.length === 0 ? (
+        <div className="mb-3 rounded-[10px] border border-dashed border-ink/15 px-3 py-2.5 text-[11.5px] text-muted">
+          No photos attached to this delivery
+        </div>
+      ) : (
+        <div className="mb-3 flex flex-wrap gap-2">
+          {goods.map((e) => (
+            <EvidencePhoto key={e.id} ev={e} />
+          ))}
+        </div>
+      )}
+      {issue.length > 0 && (
+        <>
+          <label className={label}>Photos of the issue</label>
+          <div className="mb-3 flex flex-wrap gap-2">
+            {issue.map((e) => (
+              <EvidencePhoto key={e.id} ev={e} />
+            ))}
+          </div>
+        </>
+      )}
+    </>
   )
 }
 
@@ -109,8 +125,7 @@ export function VerifyModal({ delivery, onClose }: { delivery: Delivery; onClose
         </div>
         <label className={label}>Invoice scan</label>
         <InvoiceScan delivery={delivery} />
-        <label className={label}>Goods photos from the store</label>
-        <GoodsPhotos deliveryId={delivery.id} />
+        <DeliveryPhotos deliveryId={delivery.id} />
         <div className="mb-3">
           <label className={label} htmlFor="verify-cost">
             Cost per original invoice (£)
@@ -257,8 +272,7 @@ export function DeliveryDetailModal({ delivery, onClose }: { delivery: Delivery;
 
         <label className={label}>Invoice scan</label>
         <InvoiceScan delivery={delivery} />
-        <label className={label}>Goods photos from the store</label>
-        <GoodsPhotos deliveryId={delivery.id} />
+        <DeliveryPhotos deliveryId={delivery.id} />
 
         {verified && (
           <>
